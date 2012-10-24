@@ -14,7 +14,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.jboss.arquillian.daemon.server;
+package org.jboss.arquillian.daemon.main;
 
 import java.io.File;
 import java.io.IOException;
@@ -26,7 +26,6 @@ import java.security.ProtectionDomain;
 import java.util.jar.JarFile;
 import java.util.logging.Logger;
 
-import org.jboss.arquillian.daemon.server.jbossmodules.HackJarModuleLoader;
 import org.jboss.modules.Module;
 import org.jboss.modules.ModuleIdentifier;
 import org.jboss.modules.ModuleLoadException;
@@ -40,6 +39,7 @@ public class Main {
 
     private static final Logger log = Logger.getLogger(Main.class.getName());
     private static final String LOCATION_MODULES = "META-INF/modules";
+    private static final String NAME_MODULE_ARQUILLIAN_DAEMON_SERVER = "org.jboss.arquillian.daemon";
     private static final String SYSPROP_NAME_BIND_NAME = "arquillian.daemon.bind.name";
     private static final String SYSPROP_NAME_BIND_PORT = "arquillian.daemon.bind.port";
 
@@ -60,20 +60,22 @@ public class Main {
                 throw new RuntimeException("Incorrectly-formatted URI to JAR: " + thisJar.toExternalForm());
             }
 
+            // org.jboss.arquillian.daemon
+
             final HackJarModuleLoader hack = new HackJarModuleLoader(jar, LOCATION_MODULES);
 
-            final ModuleIdentifier nettyId = ModuleIdentifier.create("io.netty");
-            final Module netty;
+            final ModuleIdentifier arquillianDaemonServerId = ModuleIdentifier.create(NAME_MODULE_ARQUILLIAN_DAEMON_SERVER);
+            final Module arquillianDaemon;
             try {
-                netty = hack.loadModule(nettyId);
+                arquillianDaemon = hack.loadModule(arquillianDaemonServerId);
             } catch (final ModuleLoadException mle) {
-                throw new RuntimeException("Could not load Netty", mle);
+                throw new RuntimeException("Could not load", mle);
             }
-            System.out.println("Netty loaded: " + netty);
+            System.out.println("loaded: " + arquillianDaemon);
 
             final Class<?> c;
             try {
-                c = netty.getClassLoader().loadClass("io.netty.bootstrap.ServerBootstrap");
+                c = arquillianDaemon.getClassLoader().loadClass("io.netty.bootstrap.ServerBootstrap");
             } catch (final ClassNotFoundException e) {
                 throw new RuntimeException(e);
             }

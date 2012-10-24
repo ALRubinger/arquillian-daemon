@@ -231,8 +231,9 @@
 
   <!-- Aggregate Modules -->
   <modules>
-    <module>server</module>
     <module>build-resources</module>
+    <module>main</module>
+    <module>server</module>
   </modules>
   
   <!-- Reporting -->

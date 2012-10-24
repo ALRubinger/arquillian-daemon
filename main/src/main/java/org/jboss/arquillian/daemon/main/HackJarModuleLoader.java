@@ -14,7 +14,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.jboss.arquillian.daemon.server.jbossmodules;
+package org.jboss.arquillian.daemon.main;
 
 import java.io.File;
 import java.io.FileOutputStream;
@@ -46,7 +46,7 @@ import org.jboss.modules.ModuleSpec;
  *             API which lets us load from a JAR
  */
 @Deprecated
-public final class HackJarModuleLoader extends ModuleLoader {
+final class HackJarModuleLoader extends ModuleLoader {
 
     private static final String SYSPROP_NAME_TMP_DIR = "java.io.tmpdir";
     private static final String PREFIX_MODULES_DIR = "modules-";
