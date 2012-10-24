@@ -16,10 +16,20 @@
  */
 package org.jboss.arquillian.daemon.server;
 
-import java.util.logging.Level;
+import java.io.File;
+import java.io.IOException;
+import java.net.URISyntaxException;
+import java.net.URL;
+import java.security.AccessController;
+import java.security.PrivilegedAction;
+import java.security.ProtectionDomain;
+import java.util.jar.JarFile;
 import java.util.logging.Logger;
 
-import org.jboss.arquillian.daemon.server.netty.NettyServer;
+import org.jboss.arquillian.daemon.server.jbossmodules.HackJarModuleLoader;
+import org.jboss.modules.Module;
+import org.jboss.modules.ModuleIdentifier;
+import org.jboss.modules.ModuleLoadException;
 
 /**
  * Standalone process entry point for the Arquillian Server Daemon
@@ -29,6 +39,7 @@ import org.jboss.arquillian.daemon.server.netty.NettyServer;
 public class Main {
 
     private static final Logger log = Logger.getLogger(Main.class.getName());
+    private static final String LOCATION_MODULES = "META-INF/modules";
     private static final String SYSPROP_NAME_BIND_NAME = "arquillian.daemon.bind.name";
     private static final String SYSPROP_NAME_BIND_PORT = "arquillian.daemon.bind.port";
 
@@ -37,21 +48,70 @@ public class Main {
      */
     public static void main(final String[] args) {
 
-        Server server = NettyServer.create("localhost", 0);
+        final ProtectionDomain domain = getProtectionDomain();
+        final URL thisJar = domain.getCodeSource().getLocation();
+        JarFile jar = null;
         try {
-            server.start();
-        } catch (final ServerLifecycleException e) {
-            throw new RuntimeException(e);
+            try {
+                jar = new JarFile(new File(thisJar.toURI()));
+            } catch (final IOException ioe) {
+                throw new RuntimeException("Could not obtain current JAR file: " + thisJar.toExternalForm());
+            } catch (final URISyntaxException e) {
+                throw new RuntimeException("Incorrectly-formatted URI to JAR: " + thisJar.toExternalForm());
+            }
+
+            final HackJarModuleLoader hack = new HackJarModuleLoader(jar, LOCATION_MODULES);
+
+            final ModuleIdentifier nettyId = ModuleIdentifier.create("io.netty");
+            final Module netty;
+            try {
+                netty = hack.loadModule(nettyId);
+            } catch (final ModuleLoadException mle) {
+                throw new RuntimeException("Could not load Netty", mle);
+            }
+            System.out.println("Netty loaded: " + netty);
+
+        } finally {
+            if (jar != null) {
+                try {
+                    jar.close();
+                } catch (final IOException ioe) {
+                    // Swallow
+                }
+            }
         }
 
-        if (log.isLoggable(Level.INFO)) {
-            log.info("Arquillian Daemon Started");
-        }
+        // ModuleLoader loader = null;
+        //
+        // Server server = NettyServer.create("localhost", 0);
+        // try {
+        // server.start();
+        // } catch (final ServerLifecycleException e) {
+        // throw new RuntimeException(e);
+        // }
+        //
+        // if (log.isLoggable(Level.INFO)) {
+        // log.info("Arquillian Daemon Started");
+        // }
+        //
+        // try {
+        // server.stop();
+        // } catch (final ServerLifecycleException e) {
+        // throw new RuntimeException(e);
+        // }
+    }
 
-        try {
-            server.stop();
-        } catch (final ServerLifecycleException e) {
-            throw new RuntimeException(e);
+    private static ProtectionDomain getProtectionDomain() throws SecurityException {
+        final Class<Main> mainClass = Main.class;
+        if (System.getSecurityManager() == null) {
+            return mainClass.getProtectionDomain();
+        } else {
+            return AccessController.doPrivileged(new PrivilegedAction<ProtectionDomain>() {
+                @Override
+                public ProtectionDomain run() {
+                    return mainClass.getProtectionDomain();
+                }
+            });
         }
     }
 
