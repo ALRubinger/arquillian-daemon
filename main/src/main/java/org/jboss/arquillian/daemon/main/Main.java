@@ -41,8 +41,11 @@ import org.jboss.modules.ModuleLoader;
  * <ol>
  * <li>hostname - The name which the server should bind to. If left unspecified, the server will bind to the wildcard
  * address.</li>
- * <li>port - An integer between 0 and {@link Servers#MAX_PORT}; if 0 is specified the system will choose a port</li>
+ * <li>port - An integer between 0 and {@link Servers#MAX_PORT}; if unspecified or 0 the system will choose a port.</li>
  * </ol>
+ *
+ * These arguments may be specified as system properties {@link Main#SYSPROP_NAME_BIND_NAME} and
+ * {@link Main#SYSPROP_NAME_BIND_PORT}, which will take precedence over command-line arguments.
  *
  * @author <a href="mailto:alr@jboss.org">Andrew Lee Rubinger</a>
  */
@@ -55,6 +58,8 @@ public class Main {
     private static final String SYSPROP_NAME_BIND_PORT = "arquillian.daemon.bind.port";
 
     /**
+     * Entry point; arguments as documented at the class level
+     *
      * @param args
      */
     public static void main(final String[] args) {
@@ -134,7 +139,7 @@ public class Main {
         } catch (final ClassNotFoundException cnfe) {
             throw new RuntimeException("Could not get server interface class", cnfe);
         }
-        final Method startMethod = getMethod(serverClass, Server.METHOD_NAME_START, new Class<?>[] {});
+        final Method startMethod = getMethod(serverClass, Server.METHOD_NAME_START, Server.METHOD_PARAMS_START);
         try {
             startMethod.invoke(server);
         } catch (final Exception e) {
@@ -146,13 +151,12 @@ public class Main {
             @Override
             public void run() {
                 log.info("Caught SIGTERM, shutting down...");
-                final Method stopMethod = getMethod(serverClass, Server.METHOD_NAME_STOP, new Class<?>[] {});
+                final Method stopMethod = getMethod(serverClass, Server.METHOD_NAME_STOP, Server.METHOD_PARAMS_STOP);
                 try {
                     stopMethod.invoke(server);
                 } catch (final Exception e) {
                     throw new RuntimeException("Could not stop server", e);
                 }
-
             }
         }));
     }
@@ -187,7 +191,6 @@ public class Main {
             throw new RuntimeException("Could not get method " + methodName + " with types "
                 + Arrays.asList(paramTypes) + " from " + clazz, nsme);
         }
-
     }
 
     private static ProtectionDomain getProtectionDomain() throws SecurityException {

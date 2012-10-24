@@ -140,7 +140,6 @@ final class HackJarModuleLoader extends ModuleLoader {
                             }
                         }
                     }
-
                 }
             }
         }
