@@ -9,7 +9,37 @@
   </parent>
 
   <modelVersion>4.0.0</modelVersion>
+  
+  <properties>
+    <version.io.netty_netty>3.5.8.Final</version.io.netty_netty>
+  </properties>
 
   <artifactId>arquillian-daemon-server</artifactId>
+  
+  <dependencies>
+    <dependency>
+        <groupId>io.netty</groupId>
+        <artifactId>netty</artifactId>
+        <version>${version.io.netty_netty}</version>
+        <scope>provided</scope>
+      </dependency>
+  </dependencies>
+  
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-jar-plugin</artifactId>
+        <configuration>
+          <archive>
+            <manifest>
+              <mainClass>org.jboss.arquillian.daemon.server.Main</mainClass>
+              <packageName>org.jboss.arquillian.daemon.server</packageName>
+            </manifest>
+          </archive>
+        </configuration>
+      </plugin>
+     </plugins>
+   </build>
 
 </project>
