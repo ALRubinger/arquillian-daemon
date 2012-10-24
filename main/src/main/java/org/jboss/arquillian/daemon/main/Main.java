@@ -36,7 +36,13 @@ import org.jboss.modules.ModuleLoadException;
 import org.jboss.modules.ModuleLoader;
 
 /**
- * Standalone process entry point for the Arquillian Server Daemon
+ * Standalone process entry point for the Arquillian Server Daemon. Accepts two (optional) arguments:
+ *
+ * <ol>
+ * <li>hostname - The name which the server should bind to. If left unspecified, the server will bind to the wildcard
+ * address.</li>
+ * <li>port - An integer between 0 and {@link Servers#MAX_PORT}; if 0 is specified the system will choose a port</li>
+ * </ol>
  *
  * @author <a href="mailto:alr@jboss.org">Andrew Lee Rubinger</a>
  */
@@ -113,6 +119,7 @@ public class Main {
             port = "0"; // Let the system select
         }
 
+        // Make a server from the factory
         final Object server;
         try {
             server = createServerMethod.invoke(null, hostname, Integer.parseInt(port));
