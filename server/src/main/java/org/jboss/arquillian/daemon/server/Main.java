@@ -71,6 +71,14 @@ public class Main {
             }
             System.out.println("Netty loaded: " + netty);
 
+            final Class<?> c;
+            try {
+                c = netty.getClassLoader().loadClass("io.netty.bootstrap.ServerBootstrap");
+            } catch (final ClassNotFoundException e) {
+                throw new RuntimeException(e);
+            }
+            System.out.println(c);
+
         } finally {
             if (jar != null) {
                 try {

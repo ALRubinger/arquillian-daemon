@@ -1,6 +1,6 @@
 <module xmlns="urn:jboss:module:1.1" name="io.netty">
     <resources>
-        <!-- Insert resources here -->
+        <resource-root path="netty-4.0.0.Alpha5.jar" />
     </resources>
 
     <dependencies>
