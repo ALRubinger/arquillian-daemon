@@ -46,6 +46,7 @@ public class NettyServer implements Server {
 
     private final ServerBootstrap bootstrap;
     private boolean running;
+    private InetSocketAddress boundAddress;
 
     private NettyServer(final InetSocketAddress bindAddress) {
         // Precondition checks
@@ -77,17 +78,20 @@ public class NettyServer implements Server {
      */
     public static Server create(final String bindAddress, final int bindPort) throws IllegalArgumentException {
 
+        // Precondition checks
         if (bindPort < 0 || bindPort > MAX_PORT) {
             throw new IllegalArgumentException("Bind port must be between 0 and " + MAX_PORT);
         }
 
+        // Create the inetaddress and ensure it's resolved
         final InetSocketAddress resolvedInetAddress = bindAddress == null ? new InetSocketAddress(bindPort)
             : new InetSocketAddress(bindAddress, bindPort);
         if (resolvedInetAddress.isUnresolved()) {
             throw new IllegalArgumentException("Address \"" + bindAddress + "\" could not be resolved");
         }
-        return new NettyServer(resolvedInetAddress);
 
+        // Create and return a new server instance
+        return new NettyServer(resolvedInetAddress);
     }
 
     /**
@@ -114,8 +118,9 @@ public class NettyServer implements Server {
             // Exception xlate
             throw new ServerLifecycleException("Encountered error in binding; could not start server.", re);
         }
+        // Set bound address
+        boundAddress = ((InetSocketAddress) openChannel.channel().localAddress());
         if (log.isLoggable(Level.INFO)) {
-            final InetSocketAddress boundAddress = ((InetSocketAddress) openChannel.channel().localAddress());
             log.info("Server started on " + boundAddress.getHostName() + ":" + boundAddress.getPort());
         }
         // Running
@@ -149,10 +154,24 @@ public class NettyServer implements Server {
 
         // Not running
         running = false;
+        boundAddress = null;
 
         if (log.isLoggable(Level.INFO)) {
             log.info("Server shutdown.");
         }
+    }
+
+    /**
+     * {@inheritDoc}
+     *
+     * @see org.jboss.arquillian.daemon.server.Server#getBindAddress()
+     */
+    @Override
+    public InetSocketAddress getBindAddress() throws IllegalStateException {
+        if (!this.isRunning()) {
+            throw new IllegalStateException("Server is not running");
+        }
+        return this.boundAddress;
     }
 
     private static class DiscardHandler extends ChannelInboundByteHandlerAdapter {

@@ -16,6 +16,8 @@
  */
 package org.jboss.arquillian.daemon.server;
 
+import java.net.InetSocketAddress;
+
 /**
  * @author <a href="mailto:alr@jboss.org">Andrew Lee Rubinger</a>
  */
@@ -45,5 +47,14 @@ public interface Server {
      * @return
      */
     boolean isRunning();
+
+    /**
+     * Obtains the address to which the current running server is bound
+     *
+     * @return
+     * @throws IllegalStateException
+     *             If {@link Server#isRunning()} is <code>false</code>
+     */
+    InetSocketAddress getBindAddress() throws IllegalStateException;
 
 }
