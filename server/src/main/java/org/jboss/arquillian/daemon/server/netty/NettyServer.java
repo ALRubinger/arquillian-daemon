@@ -16,28 +16,26 @@
  */
 package org.jboss.arquillian.daemon.server.netty;
 
+import io.netty.bootstrap.ServerBootstrap;
+import io.netty.buffer.ByteBuf;
+import io.netty.channel.ChannelFuture;
+import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.ChannelInboundByteHandlerAdapter;
+import io.netty.channel.ChannelInitializer;
+import io.netty.channel.ChannelOption;
+import io.netty.channel.socket.SocketChannel;
+import io.netty.channel.socket.nio.NioEventLoopGroup;
+import io.netty.channel.socket.nio.NioServerSocketChannel;
+
 import java.net.InetSocketAddress;
-import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
 import org.jboss.arquillian.daemon.server.Server;
 import org.jboss.arquillian.daemon.server.ServerLifecycleException;
-import org.jboss.netty.bootstrap.ServerBootstrap;
-import org.jboss.netty.channel.Channel;
-import org.jboss.netty.channel.ChannelFactory;
-import org.jboss.netty.channel.ChannelFuture;
-import org.jboss.netty.channel.ChannelHandlerContext;
-import org.jboss.netty.channel.ChannelPipeline;
-import org.jboss.netty.channel.ChannelPipelineFactory;
-import org.jboss.netty.channel.Channels;
-import org.jboss.netty.channel.MessageEvent;
-import org.jboss.netty.channel.SimpleChannelHandler;
-import org.jboss.netty.channel.socket.nio.NioServerSocketChannelFactory;
 
 /**
- * Netty-based implementation of a {@link Server}
+ * Netty-based implementation of a {@link Server}; not thread-safe.
  *
  * @author <a href="mailto:alr@jboss.org">Andrew Lee Rubinger</a>
  */
@@ -45,32 +43,23 @@ public class NettyServer implements Server {
 
     private static final Logger log = Logger.getLogger(NettyServer.class.getName());
     public static final int MAX_PORT = 65535;
-    private static final String OPTION_NAME_TCP_NO_DELAY = "child.tcpNoDelay";
-    private static final String OPTION_NAME_KEEP_ALIVE = "child.keepAlive";
-    private static final String OPTION_NAME_LOCAL_ADDRESS = "localAddress";
 
     private final ServerBootstrap bootstrap;
-    private Channel openChannel;
+    private boolean running;
 
     private NettyServer(final InetSocketAddress bindAddress) {
         // Precondition checks
         assert bindAddress != null : "Bind address must be specified";
 
         // Set up Netty Boostrap
-        final ChannelFactory factory = new NioServerSocketChannelFactory(Executors.newCachedThreadPool(),
-            Executors.newCachedThreadPool());
-        final ServerBootstrap bootstrap = new ServerBootstrap(factory);
-        bootstrap.setPipelineFactory(new ChannelPipelineFactory() {
-            @Override
-            public ChannelPipeline getPipeline() {
-                return Channels.pipeline(new EchoChannelHandler());
-            }
-        });
-
-        // Set options
-        bootstrap.setOption(OPTION_NAME_TCP_NO_DELAY, true);
-        bootstrap.setOption(OPTION_NAME_KEEP_ALIVE, true);
-        bootstrap.setOption(OPTION_NAME_LOCAL_ADDRESS, bindAddress);
+        final ServerBootstrap bootstrap = new ServerBootstrap().group(new NioEventLoopGroup(), new NioEventLoopGroup())
+            .channel(NioServerSocketChannel.class).localAddress(bindAddress)
+            .childHandler(new ChannelInitializer<SocketChannel>() {
+                @Override
+                public void initChannel(final SocketChannel ch) throws Exception {
+                    ch.pipeline().addLast(new DiscardHandler());
+                }
+            }).childOption(ChannelOption.TCP_NODELAY, true).childOption(ChannelOption.SO_KEEPALIVE, true);
 
         // Set
         this.bootstrap = bootstrap;
@@ -114,17 +103,23 @@ public class NettyServer implements Server {
             throw new IllegalStateException("Already running");
         }
 
+        // Start 'er up
+        final ChannelFuture openChannel;
         try {
-            openChannel = bootstrap.bind();
+            openChannel = bootstrap.bind().sync();
+        } catch (final InterruptedException ie) {
+            Thread.interrupted();
+            throw new ServerLifecycleException("Interrupted while awaiting server start", ie);
         } catch (final RuntimeException re) {
             // Exception xlate
             throw new ServerLifecycleException("Encountered error in binding; could not start server.", re);
         }
-
         if (log.isLoggable(Level.INFO)) {
-            final InetSocketAddress boundAddress = ((InetSocketAddress) openChannel.getLocalAddress());
+            final InetSocketAddress boundAddress = ((InetSocketAddress) openChannel.channel().localAddress());
             log.info("Server started on " + boundAddress.getHostName() + ":" + boundAddress.getPort());
         }
+        // Running
+        running = true;
     }
 
     /**
@@ -134,7 +129,7 @@ public class NettyServer implements Server {
      */
     @Override
     public boolean isRunning() {
-        return openChannel != null;
+        return running;
 
     }
 
@@ -148,34 +143,23 @@ public class NettyServer implements Server {
         if (!this.isRunning()) {
             throw new IllegalStateException("Server is not running");
         }
-        final ChannelFuture closeOp = openChannel.close();
-        if (log.isLoggable(Level.FINER)) {
-            log.finer("Sent request to close " + openChannel);
-        }
-        try {
-            closeOp.await(10, TimeUnit.SECONDS);
-        } catch (final InterruptedException ie) {
-            Thread.interrupted();
-            log.warning("Interrupted while waiting for channel to close");
-        }
-        openChannel = null;
+
+        // Shutdown
+        bootstrap.shutdown();
+
+        // Not running
+        running = false;
+
         if (log.isLoggable(Level.INFO)) {
-            log.info("Server shutdown");
+            log.info("Server shutdown.");
         }
     }
 
-    private static class EchoChannelHandler extends SimpleChannelHandler {
+    private static class DiscardHandler extends ChannelInboundByteHandlerAdapter {
 
-        /*
-         * (non-Javadoc)
-         *
-         * @see
-         * org.jboss.netty.channel.SimpleChannelHandler#messageReceived(org.jboss.netty.channel.ChannelHandlerContext,
-         * org.jboss.netty.channel.MessageEvent)
-         */
         @Override
-        public void messageReceived(final ChannelHandlerContext ctx, final MessageEvent e) throws Exception {
-            log.info(e.getMessage().toString());
+        public void inboundBufferUpdated(final ChannelHandlerContext ctx, ByteBuf in) throws Exception {
+            in.clear();
         }
 
     }
