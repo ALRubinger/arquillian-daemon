@@ -14,10 +14,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.jboss.arquillian.daemon.server.netty;
+package org.jboss.arquillian.daemon.server;
 
-import org.jboss.arquillian.daemon.server.Server;
-import org.jboss.arquillian.daemon.server.ServerLifecycleException;
 import org.junit.Assert;
 import org.junit.Test;
 
@@ -30,7 +28,7 @@ public class NettyServerTest {
 
     @Test
     public void startProhibitedIfRunning() throws ServerLifecycleException {
-        final Server server = NettyServer.create(null, 0);
+        final Server server = Servers.create(null, 0);
         server.start();
         boolean gotExpectedException = false;
         try {
@@ -47,7 +45,7 @@ public class NettyServerTest {
 
     @Test
     public void stopProhibitedIfNotRunning() throws ServerLifecycleException {
-        final Server server = NettyServer.create(null, 0);
+        final Server server = Servers.create(null, 0);
         boolean gotExpectedException = false;
         try {
             server.stop();

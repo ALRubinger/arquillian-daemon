@@ -81,7 +81,7 @@ final class HackJarModuleLoader extends ModuleLoader {
         }
 
         // Set up the local temp modules directory
-        final String tempDirName = getSystemProperty(SYSPROP_NAME_TMP_DIR);
+        final String tempDirName = SecurityActions.getSystemProperty(SYSPROP_NAME_TMP_DIR);
         final File tempDir = new File(tempDirName);
         final File modulesDir = new File(tempDir, PREFIX_MODULES_DIR + UUID.randomUUID().toString());
         if (!modulesDir.mkdir()) {
@@ -182,20 +182,6 @@ final class HackJarModuleLoader extends ModuleLoader {
     protected ModuleSpec findModule(final ModuleIdentifier moduleIdentifier) throws ModuleLoadException {
         // Due to incompatible API
         throw new UnsupportedOperationException("All loading should be done via the delegate in preoadModule");
-    }
-
-    private static String getSystemProperty(final String sysPropName) {
-        assert sysPropName != null && sysPropName.length() > 0 : "System property name must be specified";
-        if (System.getSecurityManager() == null) {
-            return System.getProperty(sysPropName);
-        } else {
-            return AccessController.doPrivileged(new PrivilegedAction<String>() {
-                @Override
-                public String run() {
-                    return System.getProperty(sysPropName);
-                }
-            });
-        }
     }
 
     private static void registerRecursiveDeleteOnExit(final File child, final File root) {

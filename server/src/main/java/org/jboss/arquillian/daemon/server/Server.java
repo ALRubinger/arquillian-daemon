@@ -23,6 +23,13 @@ import java.net.InetSocketAddress;
  */
 public interface Server {
 
+    // These exposed as part of the API to help callers using reflection (for instance to avoid CCE if accessing the
+    // server from a different ClassLoader)
+    String METHOD_NAME_START = "start";
+    Class<?>[] METHOD_PARAMS_START = new Class<?>[] {};
+    String METHOD_NAME_STOP = "stop";
+    Class<?>[] METHOD_PARAMS_STOP = new Class<?>[] {};
+
     /**
      * Starts the server
      *

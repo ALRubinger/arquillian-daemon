@@ -14,7 +14,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.jboss.arquillian.daemon.server.netty;
+package org.jboss.arquillian.daemon.server;
 
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.buffer.ByteBuf;
@@ -31,24 +31,20 @@ import java.net.InetSocketAddress;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
-import org.jboss.arquillian.daemon.server.Server;
-import org.jboss.arquillian.daemon.server.ServerLifecycleException;
-
 /**
  * Netty-based implementation of a {@link Server}; not thread-safe.
  *
  * @author <a href="mailto:alr@jboss.org">Andrew Lee Rubinger</a>
  */
-public class NettyServer implements Server {
+class NettyServer implements Server {
 
     private static final Logger log = Logger.getLogger(NettyServer.class.getName());
-    public static final int MAX_PORT = 65535;
 
     private final ServerBootstrap bootstrap;
     private boolean running;
     private InetSocketAddress boundAddress;
 
-    private NettyServer(final InetSocketAddress bindAddress) {
+    NettyServer(final InetSocketAddress bindAddress) {
         // Precondition checks
         assert bindAddress != null : "Bind address must be specified";
 
@@ -64,34 +60,6 @@ public class NettyServer implements Server {
 
         // Set
         this.bootstrap = bootstrap;
-    }
-
-    /**
-     * Creates a {@link Server} instance using the specified bind address and bind port. If no bind address is
-     * specified, the server will bind on all available addresses. The port value must be between 0 and
-     * {@link NettyServer#MAX_PORT}; if a value of 0 is selected, the system will choose a port
-     *
-     * @param bindAddress
-     * @param bindPort
-     * @return
-     * @throws IllegalArgumentException
-     */
-    public static Server create(final String bindAddress, final int bindPort) throws IllegalArgumentException {
-
-        // Precondition checks
-        if (bindPort < 0 || bindPort > MAX_PORT) {
-            throw new IllegalArgumentException("Bind port must be between 0 and " + MAX_PORT);
-        }
-
-        // Create the inetaddress and ensure it's resolved
-        final InetSocketAddress resolvedInetAddress = bindAddress == null ? new InetSocketAddress(bindPort)
-            : new InetSocketAddress(bindAddress, bindPort);
-        if (resolvedInetAddress.isUnresolved()) {
-            throw new IllegalArgumentException("Address \"" + bindAddress + "\" could not be resolved");
-        }
-
-        // Create and return a new server instance
-        return new NettyServer(resolvedInetAddress);
     }
 
     /**
@@ -147,6 +115,10 @@ public class NettyServer implements Server {
     public void stop() throws ServerLifecycleException, IllegalStateException {
         if (!this.isRunning()) {
             throw new IllegalStateException("Server is not running");
+        }
+
+        if (log.isLoggable(Level.INFO)) {
+            log.info("Requesting shutdown");
         }
 
         // Shutdown

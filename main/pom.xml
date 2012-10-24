@@ -23,7 +23,6 @@
        <groupId>org.jboss.arquillian.daemon</groupId>
        <artifactId>arquillian-daemon-server</artifactId>
        <version>${project.version}</version>
-       <scope>provided</scope>
      </dependency>
      <dependency>
        <groupId>org.jboss.modules</groupId>
@@ -58,6 +57,7 @@
               <filters>
                 <filter>
                   <artifact>org.jboss.modules:jboss-modules</artifact>
+                  <artifact>org.jboss.arquillian.daemon:arquillian-daemon-server</artifact>
                 </filter>
               </filters> 
             </configuration>
