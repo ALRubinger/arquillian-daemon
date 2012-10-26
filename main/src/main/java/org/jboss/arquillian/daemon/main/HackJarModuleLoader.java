@@ -180,7 +180,7 @@ final class HackJarModuleLoader extends ModuleLoader {
     @Override
     protected ModuleSpec findModule(final ModuleIdentifier moduleIdentifier) throws ModuleLoadException {
         // Due to incompatible API
-        throw new UnsupportedOperationException("All loading should be done via the delegate in preoadModule");
+        throw new UnsupportedOperationException("All loading should be done via the delegate in preloadModule");
     }
 
     private static void registerRecursiveDeleteOnExit(final File child, final File root) {

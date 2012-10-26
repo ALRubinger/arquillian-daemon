@@ -64,6 +64,11 @@ public class Main {
      */
     public static void main(final String[] args) {
 
+        /*
+         * Note: This entry point depends on the Executable JAR structure as assembled by the build; executing directly
+         * from a .class file or via the IDE will fail.
+         */
+
         // Get a reference to this JAR, and create a ModuleLoader pointing to its modules dir
         final ProtectionDomain domain = getProtectionDomain();
         final URL thisJar = domain.getCodeSource().getLocation();
@@ -90,17 +95,19 @@ public class Main {
             }
         }
 
+        // Load the Arquillian Daemon Module
         final ModuleIdentifier arquillianDaemonServerId = ModuleIdentifier.create(NAME_MODULE_ARQUILLIAN_DAEMON_SERVER);
-        final Module arquillianDaemon;
+        final Module arquillianDaemonModule;
         try {
-            arquillianDaemon = loader.loadModule(arquillianDaemonServerId);
+            arquillianDaemonModule = loader.loadModule(arquillianDaemonServerId);
         } catch (final ModuleLoadException mle) {
-            throw new RuntimeException("Could not load", mle);
+            throw new RuntimeException("Could not load Arquillian Daemon module", mle);
         }
 
+        // Use reflection to get the server factory class to avoid CCE
         final Class<?> serverFactoryClass;
         try {
-            serverFactoryClass = arquillianDaemon.getClassLoader().loadClass(Servers.class.getName());
+            serverFactoryClass = arquillianDaemonModule.getClassLoader().loadClass(Servers.class.getName());
         } catch (final ClassNotFoundException e) {
             throw new RuntimeException(e);
         }
@@ -135,7 +142,7 @@ public class Main {
         // Start
         final Class<?> serverClass;
         try {
-            serverClass = arquillianDaemon.getClassLoader().loadClass(Server.class.getName());
+            serverClass = arquillianDaemonModule.getClassLoader().loadClass(Server.class.getName());
         } catch (final ClassNotFoundException cnfe) {
             throw new RuntimeException("Could not get server interface class", cnfe);
         }
