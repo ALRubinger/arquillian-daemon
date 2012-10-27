@@ -240,9 +240,10 @@
   <!-- Aggregate Modules -->
   <modules>
     <module>build-resources</module>
-    <module>container-embedded</module>
+    <module>container-managed</module>
     <module>main</module>
-    <module>protocol</module>
+    <module>protocol-arquillian</module>
+    <module>protocol-wire</module>
     <module>server</module>
   </modules>
   

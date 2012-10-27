@@ -18,6 +18,7 @@ package org.jboss.arquillian.daemon.main;
 
 import java.io.File;
 import java.io.IOException;
+import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.net.URISyntaxException;
 import java.net.URL;
@@ -53,7 +54,7 @@ public class Main {
 
     private static final Logger log = Logger.getLogger(Main.class.getName());
     private static final String LOCATION_MODULES = "META-INF/modules";
-    private static final String NAME_MODULE_ARQUILLIAN_DAEMON_SERVER = "org.jboss.arquillian.daemon";
+    private static final String NAME_MODULE_ARQUILLIAN_DAEMON_SERVER = "org.jboss.arquillian.daemon.server";
     private static final String SYSPROP_NAME_BIND_NAME = "arquillian.daemon.bind.name";
     private static final String SYSPROP_NAME_BIND_PORT = "arquillian.daemon.bind.port";
 
@@ -157,10 +158,17 @@ public class Main {
         Runtime.getRuntime().addShutdownHook(new Thread(new Runnable() {
             @Override
             public void run() {
-                log.info("Caught SIGTERM, shutting down...");
+                log.info("Caught signal, shutting down...");
                 final Method stopMethod = getMethod(serverClass, Server.METHOD_NAME_STOP, Server.METHOD_PARAMS_STOP);
                 try {
                     stopMethod.invoke(server);
+                } catch (final InvocationTargetException ite) {
+                    final Throwable cause = ite.getCause();
+                    if (cause instanceof IllegalStateException) {
+                        // Server isn't running, ignore
+                        return;
+                    }
+                    throw new RuntimeException("Encountered error invoking stop on server", cause);
                 } catch (final Exception e) {
                     throw new RuntimeException("Could not stop server", e);
                 }

@@ -21,15 +21,25 @@ import io.netty.buffer.ByteBuf;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundByteHandlerAdapter;
+import io.netty.channel.ChannelInboundMessageHandlerAdapter;
 import io.netty.channel.ChannelInitializer;
 import io.netty.channel.ChannelOption;
+import io.netty.channel.ChannelPipeline;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.channel.socket.nio.NioEventLoopGroup;
 import io.netty.channel.socket.nio.NioServerSocketChannel;
+import io.netty.handler.codec.DelimiterBasedFrameDecoder;
+import io.netty.handler.codec.Delimiters;
+import io.netty.handler.codec.string.StringDecoder;
 
 import java.net.InetSocketAddress;
+import java.nio.charset.Charset;
+import java.util.logging.Handler;
 import java.util.logging.Level;
+import java.util.logging.LogRecord;
 import java.util.logging.Logger;
+
+import org.jboss.arquillian.daemon.protocol.wire.WireProtocol;
 
 /**
  * Netty-based implementation of a {@link Server}; not thread-safe.
@@ -53,8 +63,10 @@ class NettyServer implements Server {
             .channel(NioServerSocketChannel.class).localAddress(bindAddress)
             .childHandler(new ChannelInitializer<SocketChannel>() {
                 @Override
-                public void initChannel(final SocketChannel ch) throws Exception {
-                    ch.pipeline().addLast(new DiscardHandler());
+                public void initChannel(final SocketChannel channel) throws Exception {
+
+                    final ChannelPipeline pipeline = channel.pipeline();
+                    pipeline.addLast(new ActionControllerHandler());
                 }
             }).childOption(ChannelOption.TCP_NODELAY, true).childOption(ChannelOption.SO_KEEPALIVE, true);
 
@@ -113,12 +125,35 @@ class NettyServer implements Server {
      */
     @Override
     public void stop() throws ServerLifecycleException, IllegalStateException {
+
+        // Use an anonymous logger because the JUL LogManager will not log after process shutdown has been received
+        final Logger log = Logger.getAnonymousLogger();
+        log.addHandler(new Handler() {
+
+            private final String PREFIX = "[" + NettyServer.class.getSimpleName() + "] ";
+
+            @Override
+            public void publish(final LogRecord record) {
+                System.out.println(PREFIX + record.getMessage());
+
+            }
+
+            @Override
+            public void flush() {
+
+            }
+
+            @Override
+            public void close() throws SecurityException {
+            }
+        });
+
         if (!this.isRunning()) {
             throw new IllegalStateException("Server is not running");
         }
 
         if (log.isLoggable(Level.INFO)) {
-            log.info("Requesting shutdown");
+            log.info("Requesting shutdown...");
         }
 
         // Shutdown
@@ -146,11 +181,103 @@ class NettyServer implements Server {
         return this.boundAddress;
     }
 
-    private static class DiscardHandler extends ChannelInboundByteHandlerAdapter {
+    /**
+     * Handler for all {@link String}-based commands to the server as specified in {@link WireProtocol}
+     *
+     * @author <a href="mailto:alr@jboss.org">Andrew Lee Rubinger</a>
+     */
+    private class CommandHandler extends ChannelInboundMessageHandlerAdapter<String> {
+
+        /**
+         * {@inheritDoc}
+         *
+         * @see io.netty.channel.ChannelInboundMessageHandlerAdapter#messageReceived(io.netty.channel.ChannelHandlerContext,
+         *      java.lang.Object)
+         */
+        @Override
+        public void messageReceived(final ChannelHandlerContext ctx, final String message) throws Exception {
+            if (log.isLoggable(Level.FINEST)) {
+                log.finest("Got command: " + message);
+            }
+
+            // Read and handle commands
+            if (WireProtocol.COMMAND_STOP.equals(message)) {
+                NettyServer.this.stop();
+            }
+            // Unsupported command
+            else {
+                throw new UnsupportedOperationException("This server does not support command: " + message);
+            }
+
+        }
+
+        /**
+         * Ignores all exceptions on messages received if the server is not running, else delegates to the super
+         * implementation.
+         *
+         * @see io.netty.channel.ChannelStateHandlerAdapter#exceptionCaught(io.netty.channel.ChannelHandlerContext,
+         *      java.lang.Throwable)
+         */
+        @Override
+        public void exceptionCaught(final ChannelHandlerContext ctx, final Throwable cause) throws Exception {
+            // If the server isn't running, ignore everything
+            if (!NettyServer.this.isRunning()) {
+                // Ignore, but log if we've got a fine-grained enough level set
+                if (log.isLoggable(Level.FINEST)) {
+                    log.finest("Got exception while server is not running: " + cause.getMessage());
+                }
+            } else {
+                super.exceptionCaught(ctx, cause);
+            }
+        }
+
+    }
+
+    /**
+     * Determines the type of request and adjusts the pipeline to handle appropriately
+     *
+     * @author <a href="mailto:alr@jboss.org">Andrew Lee Rubinger</a>
+     */
+    private final class ActionControllerHandler extends ChannelInboundByteHandlerAdapter {
 
         @Override
-        public void inboundBufferUpdated(final ChannelHandlerContext ctx, ByteBuf in) throws Exception {
-            in.clear();
+        public void inboundBufferUpdated(final ChannelHandlerContext ctx, final ByteBuf in) throws Exception {
+
+            // We require at least three bytes to determine the action taken
+            if (in.readableBytes() < 3) {
+                return;
+            }
+
+            // String-based Command?
+            if (this.isCommand(in)) {
+                // Adjust the pipeline such that we use the command handler
+                final ChannelPipeline pipeline = ctx.pipeline();
+                pipeline.addLast(new DelimiterBasedFrameDecoder(80, Delimiters.lineDelimiter()), new StringDecoder(
+                    Charset.forName(WireProtocol.CHARSET)), new CommandHandler());
+                pipeline.remove(this);
+            }
+
+            // Archive deployment?
+            // TODO
+            // pipeline.addLast(
+            // new ObjectDecoder(ClassResolvers.cacheDisabled(NettyServer.class.getClassLoader())),
+            // new StringCommandHandler());
+
+        }
+
+        /**
+         * Determines whether we have a command
+         *
+         * @param in
+         * @return
+         */
+        private boolean isCommand(final ByteBuf in) {
+            final int magic1 = in.getUnsignedByte(in.readerIndex());
+            final int magic2 = in.getUnsignedByte(in.readerIndex() + 1);
+            final int magic3 = in.getUnsignedByte(in.readerIndex() + 2);
+            // First the bytes matches command prefix?
+            return magic1 == WireProtocol.COMMAND_PREFIX.charAt(0) && magic2 == WireProtocol.COMMAND_PREFIX.charAt(1)
+                && magic3 == WireProtocol.COMMAND_PREFIX.charAt(2);
         }
 
     }

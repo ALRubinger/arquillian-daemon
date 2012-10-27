@@ -25,6 +25,11 @@
        <version>${project.version}</version>
      </dependency>
      <dependency>
+       <groupId>org.jboss.arquillian.daemon</groupId>
+       <artifactId>arquillian-daemon-protocol-wire</artifactId>
+       <version>${project.version}</version>
+     </dependency>
+     <dependency>
        <groupId>org.jboss.modules</groupId>
       <artifactId>jboss-modules</artifactId>
       <version>${version.org.jboss.modules}</version>
@@ -89,13 +94,13 @@
             </configuration>
           </execution>
           <execution>
-            <id>copyDaemon</id>
+            <id>copyServer</id>
             <phase>prepare-package</phase>
             <goals>
               <goal>copy</goal>
             </goals>
             <configuration>
-              <outputDirectory>${project.build.outputDirectory}/META-INF/modules/org/jboss/arquillian/daemon/main</outputDirectory>
+              <outputDirectory>${project.build.outputDirectory}/META-INF/modules/org/jboss/arquillian/daemon/server/main</outputDirectory>
               <overWriteReleases>false</overWriteReleases>
               <overWriteSnapshots>false</overWriteSnapshots>
               <overWriteIfNewer>true</overWriteIfNewer>
@@ -104,6 +109,26 @@
                 <artifactItem>
                   <groupId>org.jboss.arquillian.daemon</groupId>
                   <artifactId>arquillian-daemon-server</artifactId>
+                </artifactItem>
+              </artifactItems>
+            </configuration>
+          </execution>
+          <execution>
+            <id>copyWireProtocol</id>
+            <phase>prepare-package</phase>
+            <goals>
+              <goal>copy</goal>
+            </goals>
+            <configuration>
+              <outputDirectory>${project.build.outputDirectory}/META-INF/modules/org/jboss/arquillian/daemon/protocol/wire/main</outputDirectory>
+              <overWriteReleases>false</overWriteReleases>
+              <overWriteSnapshots>false</overWriteSnapshots>
+              <overWriteIfNewer>true</overWriteIfNewer>
+              <stripVersion>true</stripVersion>
+              <artifactItems>
+                <artifactItem>
+                  <groupId>org.jboss.arquillian.daemon</groupId>
+                  <artifactId>arquillian-daemon-protocol-wire</artifactId>
                 </artifactItem>
               </artifactItems>
             </configuration>
