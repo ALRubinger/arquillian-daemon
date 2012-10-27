@@ -42,7 +42,8 @@ import java.util.logging.Logger;
 import org.jboss.arquillian.daemon.protocol.wire.WireProtocol;
 
 /**
- * Netty-based implementation of a {@link Server}; not thread-safe.
+ * Netty-based implementation of a {@link Server}; not thread-safe (though invoking operations through its communication
+ * channels is).
  *
  * @author <a href="mailto:alr@jboss.org">Andrew Lee Rubinger</a>
  */
@@ -186,7 +187,7 @@ class NettyServer implements Server {
      *
      * @author <a href="mailto:alr@jboss.org">Andrew Lee Rubinger</a>
      */
-    private class CommandHandler extends ChannelInboundMessageHandlerAdapter<String> {
+    private class StringCommandHandler extends ChannelInboundMessageHandlerAdapter<String> {
 
         /**
          * {@inheritDoc}
@@ -202,6 +203,14 @@ class NettyServer implements Server {
 
             // Read and handle commands
             if (WireProtocol.COMMAND_STOP.equals(message)) {
+
+                // Tell the client OK
+                final ByteBuf out = ctx.nextOutboundByteBuffer();
+                out.discardReadBytes();
+                out.writeBytes(WireProtocol.RESPONSE_OK.getBytes(WireProtocol.CHARSET));
+                ctx.flush();
+
+                // Now stop (after we send the response, else we'll prematurely close the connection)
                 NettyServer.this.stop();
             }
             // Unsupported command
@@ -226,6 +235,7 @@ class NettyServer implements Server {
                 if (log.isLoggable(Level.FINEST)) {
                     log.finest("Got exception while server is not running: " + cause.getMessage());
                 }
+                ctx.close();
             } else {
                 super.exceptionCaught(ctx, cause);
             }
@@ -248,20 +258,33 @@ class NettyServer implements Server {
                 return;
             }
 
+            // Get the pipeline so we can dynamically adjust it and fire events
+            final ChannelPipeline pipeline = ctx.pipeline();
+
             // String-based Command?
-            if (this.isCommand(in)) {
+            if (this.isStringCommand(in)) {
                 // Adjust the pipeline such that we use the command handler
-                final ChannelPipeline pipeline = ctx.pipeline();
                 pipeline.addLast(new DelimiterBasedFrameDecoder(80, Delimiters.lineDelimiter()), new StringDecoder(
-                    Charset.forName(WireProtocol.CHARSET)), new CommandHandler());
+                    Charset.forName(WireProtocol.CHARSET)), new StringCommandHandler());
                 pipeline.remove(this);
+
+            } else {
+                // Unknown command/protocol
+                in.clear();
+                ctx.close();
+                return;
             }
+
+            // Write the bytes again and re-fire so the updated handlers in the pipeline can have a go at it
+            ctx.nextInboundByteBuffer().writeBytes(in);
+            pipeline.fireInboundBufferUpdated();
 
             // Archive deployment?
             // TODO
             // pipeline.addLast(
             // new ObjectDecoder(ClassResolvers.cacheDisabled(NettyServer.class.getClassLoader())),
             // new StringCommandHandler());
+            // new StringDecoder()
 
         }
 
@@ -271,13 +294,14 @@ class NettyServer implements Server {
          * @param in
          * @return
          */
-        private boolean isCommand(final ByteBuf in) {
+        private boolean isStringCommand(final ByteBuf in) {
             final int magic1 = in.getUnsignedByte(in.readerIndex());
             final int magic2 = in.getUnsignedByte(in.readerIndex() + 1);
             final int magic3 = in.getUnsignedByte(in.readerIndex() + 2);
             // First the bytes matches command prefix?
-            return magic1 == WireProtocol.COMMAND_PREFIX.charAt(0) && magic2 == WireProtocol.COMMAND_PREFIX.charAt(1)
-                && magic3 == WireProtocol.COMMAND_PREFIX.charAt(2);
+            return magic1 == WireProtocol.PREFIX_STRING_COMMAND.charAt(0)
+                && magic2 == WireProtocol.PREFIX_STRING_COMMAND.charAt(1)
+                && magic3 == WireProtocol.PREFIX_STRING_COMMAND.charAt(2);
         }
 
     }

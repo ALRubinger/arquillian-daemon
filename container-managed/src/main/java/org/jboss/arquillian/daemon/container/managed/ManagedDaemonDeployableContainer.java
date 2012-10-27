@@ -16,8 +16,11 @@
  */
 package org.jboss.arquillian.daemon.container.managed;
 
+import java.io.BufferedReader;
 import java.io.File;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.io.OutputStreamWriter;
 import java.io.PrintWriter;
 import java.lang.ProcessBuilder.Redirect;
@@ -101,8 +104,9 @@ public class ManagedDaemonDeployableContainer implements DeployableContainer<Man
             }
         };
 
-        shutdownThread = new Thread(shutdownServerRunnable);
-        Runtime.getRuntime().addShutdownHook(shutdownThread);
+        // TODO Re-enable
+        // shutdownThread = new Thread(shutdownServerRunnable);
+        // Runtime.getRuntime().addShutdownHook(shutdownThread);
 
         try {
             Thread.sleep(1000);
@@ -164,11 +168,16 @@ public class ManagedDaemonDeployableContainer implements DeployableContainer<Man
         // }
 
         Socket socket = null;
+        BufferedReader reader = null;
         try {
             socket = new Socket("localhost", 12345);
             final PrintWriter writer = new PrintWriter(new OutputStreamWriter(socket.getOutputStream(),
                 WireProtocol.CHARSET), true);
             writer.println(WireProtocol.COMMAND_STOP);
+            final InputStream in = socket.getInputStream();
+            reader = new BufferedReader(new InputStreamReader(in));
+            final String response = reader.readLine();
+            System.out.println("Client got response: " + response);
         } catch (final UnknownHostException e) {
             // TODO Auto-generated catch block
             e.printStackTrace();
@@ -179,6 +188,12 @@ public class ManagedDaemonDeployableContainer implements DeployableContainer<Man
             if (socket != null) {
                 try {
                     socket.close();
+                } catch (final IOException ignore) {
+                }
+            }
+            if (reader != null) {
+                try {
+                    reader.close();
                 } catch (final IOException ignore) {
                 }
             }

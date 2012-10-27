@@ -25,11 +25,12 @@ public interface WireProtocol {
 
     String CHARSET = "UTF-8";
 
-    String COMMAND_PREFIX = "CMD ";
+    String PREFIX_STRING_COMMAND = "CMD ";
+    String PREFIX_DEPLOY_COMMAND = "DPL ";
 
-    String COMMAND_STOP = COMMAND_PREFIX + "stop";
-    String COMMAND_DEPLOY = COMMAND_PREFIX + "deploy";
-    String COMMAND_UNDEPLOY = COMMAND_PREFIX + "undeploy";
+    String COMMAND_STOP = PREFIX_STRING_COMMAND + "stop";
+    String COMMAND_DEPLOY = PREFIX_DEPLOY_COMMAND + "deploy";
+    String COMMAND_UNDEPLOY = PREFIX_STRING_COMMAND + "undeploy";
 
     String RESPONSE_OK = "OK";
     String RESPONSE_EXCEPTION_PREFIX = "ERR ";
