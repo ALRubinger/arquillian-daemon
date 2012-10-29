@@ -29,10 +29,10 @@ public interface WireProtocol {
     String PREFIX_DEPLOY_COMMAND = "DPL ";
 
     String COMMAND_STOP = PREFIX_STRING_COMMAND + "stop";
-    String COMMAND_DEPLOY = PREFIX_DEPLOY_COMMAND + "deploy";
+    String COMMAND_DEPLOY = PREFIX_DEPLOY_COMMAND;
     String COMMAND_UNDEPLOY = PREFIX_STRING_COMMAND + "undeploy";
 
-    String RESPONSE_OK = "OK";
+    String RESPONSE_OK_PREFIX = "OK ";
     String RESPONSE_EXCEPTION_PREFIX = "ERR ";
 
 }

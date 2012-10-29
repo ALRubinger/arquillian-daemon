@@ -16,6 +16,19 @@
  */
 package org.jboss.arquillian.daemon.server;
 
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.io.OutputStreamWriter;
+import java.io.PrintWriter;
+import java.net.Socket;
+import java.net.UnknownHostException;
+
+import org.jboss.arquillian.daemon.protocol.wire.WireProtocol;
+import org.jboss.shrinkwrap.api.ShrinkWrap;
+import org.jboss.shrinkwrap.api.exporter.ZipExporter;
+import org.jboss.shrinkwrap.api.spec.JavaArchive;
 import org.junit.Assert;
 import org.junit.Test;
 
@@ -55,4 +68,60 @@ public class NettyServerTest {
         Assert.assertTrue("Server should not be able to be stopped if not running", gotExpectedException);
     }
 
+    @Test
+    public void testForNorman() throws ServerLifecycleException {
+        final Server server = Servers.create(null, 12345);
+        server.start();
+
+        final JavaArchive archive = ShrinkWrap.create(JavaArchive.class, "myarchive.jar").addClass(this.getClass());
+
+        Socket socket = null;
+        BufferedReader reader = null;
+        try {
+            socket = new Socket("localhost", 12345);
+            final OutputStream socketOutstream = socket.getOutputStream();
+            final PrintWriter writer = new PrintWriter(new OutputStreamWriter(socketOutstream, WireProtocol.CHARSET),
+                true);
+
+            // Now write the archive
+            final InputStream archiveInstream = archive.as(ZipExporter.class).exportAsInputStream();
+            int read = 0;
+            final byte[] buffer = new byte[1024];
+            writer.print(WireProtocol.COMMAND_DEPLOY);
+
+            while ((read = archiveInstream.read(buffer, 0, buffer.length)) != -1) {
+                socketOutstream.write(buffer, 0, read);
+            }
+            // Terminate the command
+            writer.println();
+            //
+            //
+            // final InputStream responseStream = socket.getInputStream();
+            // reader = new BufferedReader(new InputStreamReader(responseStream));
+            // System.out.println("Got response from deployment: " + reader.readLine());
+            // System.out.println("Got response from deployment 2: " + reader.readLine());
+
+        } catch (final UnknownHostException e) {
+            // TODO Auto-generated catch block
+            e.printStackTrace();
+        } catch (final IOException e) {
+            // TODO Auto-generated catch block
+            e.printStackTrace();
+        } finally {
+            if (socket != null) {
+                try {
+                    socket.close();
+                } catch (final IOException ignore) {
+                }
+            }
+            if (reader != null) {
+                try {
+                    reader.close();
+                } catch (final IOException ignore) {
+                }
+            }
+        }
+
+        server.stop();
+    }
 }

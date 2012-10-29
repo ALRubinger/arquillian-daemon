@@ -18,6 +18,7 @@ package org.jboss.arquillian.daemon.server;
 
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.buffer.ByteBuf;
+import io.netty.buffer.ByteBufInputStream;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundByteHandlerAdapter;
@@ -32,14 +33,23 @@ import io.netty.handler.codec.DelimiterBasedFrameDecoder;
 import io.netty.handler.codec.Delimiters;
 import io.netty.handler.codec.string.StringDecoder;
 
+import java.io.InputStream;
+import java.io.UnsupportedEncodingException;
 import java.net.InetSocketAddress;
 import java.nio.charset.Charset;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.logging.Handler;
 import java.util.logging.Level;
 import java.util.logging.LogRecord;
 import java.util.logging.Logger;
 
 import org.jboss.arquillian.daemon.protocol.wire.WireProtocol;
+import org.jboss.shrinkwrap.api.ConfigurationBuilder;
+import org.jboss.shrinkwrap.api.Domain;
+import org.jboss.shrinkwrap.api.GenericArchive;
+import org.jboss.shrinkwrap.api.ShrinkWrap;
+import org.jboss.shrinkwrap.api.importer.ZipImporter;
 
 /**
  * Netty-based implementation of a {@link Server}; not thread-safe (though invoking operations through its communication
@@ -65,7 +75,6 @@ class NettyServer implements Server {
             .childHandler(new ChannelInitializer<SocketChannel>() {
                 @Override
                 public void initChannel(final SocketChannel channel) throws Exception {
-
                     final ChannelPipeline pipeline = channel.pipeline();
                     pipeline.addLast(new ActionControllerHandler());
                 }
@@ -202,20 +211,24 @@ class NettyServer implements Server {
             }
 
             // Read and handle commands
-            if (WireProtocol.COMMAND_STOP.equals(message)) {
+            try {
+                if (WireProtocol.COMMAND_STOP.equals(message)) {
 
-                // Tell the client OK
-                final ByteBuf out = ctx.nextOutboundByteBuffer();
-                out.discardReadBytes();
-                out.writeBytes(WireProtocol.RESPONSE_OK.getBytes(WireProtocol.CHARSET));
-                ctx.flush();
+                    // Tell the client OK
+                    final ByteBuf out = ctx.nextOutboundByteBuffer();
+                    NettyServer.sendResponse(ctx, out, WireProtocol.RESPONSE_OK_PREFIX);
 
-                // Now stop (after we send the response, else we'll prematurely close the connection)
-                NettyServer.this.stop();
-            }
-            // Unsupported command
-            else {
-                throw new UnsupportedOperationException("This server does not support command: " + message);
+                    // Now stop (after we send the response, else we'll prematurely close the connection)
+                    NettyServer.this.stop();
+                }
+                // Unsupported command
+                else {
+                    throw new UnsupportedOperationException("This server does not support command: " + message);
+                }
+            } finally {
+                final ChannelPipeline pipeline = ctx.pipeline();
+                pipeline.addLast(new ActionControllerHandler());
+                pipeline.remove(this);
             }
 
         }
@@ -243,6 +256,58 @@ class NettyServer implements Server {
 
     }
 
+    private static void sendResponse(final ChannelHandlerContext ctx, final ByteBuf out, final String response) {
+        out.discardReadBytes();
+        try {
+            out.writeBytes(response.getBytes(WireProtocol.CHARSET));
+            out.writeBytes(Delimiters.lineDelimiter()[0]);
+        } catch (final UnsupportedEncodingException uee) {
+            throw new RuntimeException("Unsupported encoding", uee);
+        }
+        ctx.flush();
+    }
+
+    private final class DeployHandlerAdapter extends ChannelInboundByteHandlerAdapter {
+
+        @Override
+        public void inboundBufferUpdated(final ChannelHandlerContext ctx, final ByteBuf in) throws Exception {
+            try {
+                log.info("using the DeployHandlerAdapter");
+                final InputStream instream = new ByteBufInputStream(in);
+
+                // final File file = new File("/home/alr/Desktop/something.jar");
+                // final OutputStream fileout = new FileOutputStream(file);
+                // int read = 0;
+                // final byte[] buffer = new byte[1024];
+                //
+                // while ((read = instream.read(buffer, 0, buffer.length)) != -1) {
+                // fileout.write(buffer, 0, read);
+                // }
+                // fileout.close();
+
+                final Set<ClassLoader> classloaders = new HashSet<ClassLoader>(1);
+                classloaders.add(NettyServer.class.getClassLoader());
+                log.info("Using ClassLoader: " + NettyServer.class.getClassLoader());
+                final Domain domain = ShrinkWrap.createDomain(new ConfigurationBuilder().classLoaders(classloaders));
+                final GenericArchive archive = domain.getArchiveFactory().create(ZipImporter.class)
+                    .importFrom(instream).as(GenericArchive.class);
+                instream.close();
+                // Tell the client OK
+                final ByteBuf out = ctx.nextOutboundByteBuffer();
+
+                log.info("Got archive: " + archive.toString(true));
+                NettyServer.sendResponse(ctx, out, WireProtocol.RESPONSE_OK_PREFIX + WireProtocol.COMMAND_DEPLOY);
+            } finally {
+
+                final ChannelPipeline pipeline = ctx.pipeline();
+                pipeline.addLast(new ActionControllerHandler());
+                pipeline.remove(this);
+
+            }
+        }
+
+    }
+
     /**
      * Determines the type of request and adjusts the pipeline to handle appropriately
      *
@@ -261,11 +326,34 @@ class NettyServer implements Server {
             // Get the pipeline so we can dynamically adjust it and fire events
             final ChannelPipeline pipeline = ctx.pipeline();
 
+            // Pull out the magic header
+            int readerIndex = in.readerIndex();
+            final int magic1 = in.getUnsignedByte(readerIndex);
+            final int magic2 = in.getUnsignedByte(readerIndex + 1);
+            final int magic3 = in.getUnsignedByte(readerIndex + 2);
+
+            log.info(new String(new byte[] { (byte) magic1, (byte) magic2, (byte) magic3 }, Charset
+                .forName(WireProtocol.CHARSET)));
+
             // String-based Command?
-            if (this.isStringCommand(in)) {
+            if (this.isStringCommand(magic1, magic2, magic3)) {
                 // Adjust the pipeline such that we use the command handler
                 pipeline.addLast(new DelimiterBasedFrameDecoder(80, Delimiters.lineDelimiter()), new StringDecoder(
                     Charset.forName(WireProtocol.CHARSET)), new StringCommandHandler());
+                pipeline.remove(this);
+
+            }
+            // Deploy command?
+            else if (this.isDeployCommand(magic1, magic2, magic3)) {
+                log.info("DEPLOY COMMAND received");
+                // Set the writer index so we strip out the command portion, leaving only the bytes containing the
+                // archive
+                in.readerIndex(in.readerIndex() + WireProtocol.PREFIX_DEPLOY_COMMAND.length());
+                // in.writerIndex(WireProtocol.PREFIX_DEPLOY_COMMAND.length() - 1);
+
+                // Adjust the pipeline such that we use the deploy handler
+                // pipeline.addLast(new DelimiterBasedFrameDecoder(Integer.MAX_VALUE, Delimiters.lineDelimiter()));
+                pipeline.addLast(new DeployHandlerAdapter());
                 pipeline.remove(this);
 
             } else {
@@ -289,19 +377,32 @@ class NettyServer implements Server {
         }
 
         /**
-         * Determines whether we have a command
+         * Determines whether we have a {@link String}-based command
          *
-         * @param in
+         * @param magic1
+         * @param magic2
+         * @param magic3
          * @return
          */
-        private boolean isStringCommand(final ByteBuf in) {
-            final int magic1 = in.getUnsignedByte(in.readerIndex());
-            final int magic2 = in.getUnsignedByte(in.readerIndex() + 1);
-            final int magic3 = in.getUnsignedByte(in.readerIndex() + 2);
+        private boolean isStringCommand(final int magic1, final int magic2, final int magic3) {
             // First the bytes matches command prefix?
             return magic1 == WireProtocol.PREFIX_STRING_COMMAND.charAt(0)
                 && magic2 == WireProtocol.PREFIX_STRING_COMMAND.charAt(1)
                 && magic3 == WireProtocol.PREFIX_STRING_COMMAND.charAt(2);
+        }
+
+        /**
+         * Determines whether we have a deployment command
+         *
+         * @param magic1
+         * @param magic2
+         * @param magic3
+         * @return
+         */
+        private boolean isDeployCommand(final int magic1, final int magic2, final int magic3) {
+            return magic1 == WireProtocol.PREFIX_DEPLOY_COMMAND.charAt(0)
+                && magic2 == WireProtocol.PREFIX_DEPLOY_COMMAND.charAt(1)
+                && magic3 == WireProtocol.PREFIX_DEPLOY_COMMAND.charAt(2);
         }
 
     }

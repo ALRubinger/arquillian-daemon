@@ -20,7 +20,7 @@ import java.io.BufferedReader;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.InputStreamReader;
+import java.io.OutputStream;
 import java.io.OutputStreamWriter;
 import java.io.PrintWriter;
 import java.lang.ProcessBuilder.Redirect;
@@ -39,6 +39,7 @@ import org.jboss.arquillian.container.spi.client.protocol.metadata.ProtocolMetaD
 import org.jboss.arquillian.daemon.protocol.arquillian.DaemonProtocol;
 import org.jboss.arquillian.daemon.protocol.wire.WireProtocol;
 import org.jboss.shrinkwrap.api.Archive;
+import org.jboss.shrinkwrap.api.exporter.ZipExporter;
 import org.jboss.shrinkwrap.descriptor.api.Descriptor;
 
 /**
@@ -104,9 +105,8 @@ public class ManagedDaemonDeployableContainer implements DeployableContainer<Man
             }
         };
 
-        // TODO Re-enable
-        // shutdownThread = new Thread(shutdownServerRunnable);
-        // Runtime.getRuntime().addShutdownHook(shutdownThread);
+        shutdownThread = new Thread(shutdownServerRunnable);
+        Runtime.getRuntime().addShutdownHook(shutdownThread);
 
         try {
             Thread.sleep(1000);
@@ -171,13 +171,30 @@ public class ManagedDaemonDeployableContainer implements DeployableContainer<Man
         BufferedReader reader = null;
         try {
             socket = new Socket("localhost", 12345);
-            final PrintWriter writer = new PrintWriter(new OutputStreamWriter(socket.getOutputStream(),
-                WireProtocol.CHARSET), true);
-            writer.println(WireProtocol.COMMAND_STOP);
-            final InputStream in = socket.getInputStream();
-            reader = new BufferedReader(new InputStreamReader(in));
-            final String response = reader.readLine();
-            System.out.println("Client got response: " + response);
+            final OutputStream socketOutstream = socket.getOutputStream();
+            final PrintWriter writer = new PrintWriter(new OutputStreamWriter(socketOutstream, WireProtocol.CHARSET),
+                true);
+
+            // Now write the archive
+            final InputStream archiveInstream = archive.as(ZipExporter.class).exportAsInputStream();
+            int read = 0;
+            final byte[] buffer = new byte[1024];
+            writer.print(WireProtocol.COMMAND_DEPLOY);
+            // while ((read = archiveInstream.read(buffer, 0, buffer.length)) != -1) {
+            // socketOutstream.write(buffer, 0, read);
+            // System.out.println("Wrote: " + read);
+            // }
+            // Terminate the command
+            writer.println();
+            socketOutstream.flush();
+            System.out.println("all she wrote on the client");
+
+            // writer.println(WireProtocol.COMMAND_STOP);
+            // final InputStream in = socket.getInputStream();
+            // reader = new BufferedReader(new InputStreamReader(in));
+            // final String response = reader.readLine();
+            // System.out.println("Client got response: " + response);
+
         } catch (final UnknownHostException e) {
             // TODO Auto-generated catch block
             e.printStackTrace();

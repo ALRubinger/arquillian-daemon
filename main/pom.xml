@@ -19,27 +19,27 @@
   <name>Main Client</name>
   
   <dependencies>
-     <dependency>
-       <groupId>org.jboss.arquillian.daemon</groupId>
-       <artifactId>arquillian-daemon-server</artifactId>
-       <version>${project.version}</version>
-     </dependency>
-     <dependency>
-       <groupId>org.jboss.arquillian.daemon</groupId>
-       <artifactId>arquillian-daemon-protocol-wire</artifactId>
-       <version>${project.version}</version>
-     </dependency>
-     <dependency>
-       <groupId>org.jboss.modules</groupId>
+    <dependency>
+      <groupId>org.jboss.arquillian.daemon</groupId>
+      <artifactId>arquillian-daemon-server</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>org.jboss.arquillian.daemon</groupId>
+      <artifactId>arquillian-daemon-protocol-wire</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>org.jboss.modules</groupId>
       <artifactId>jboss-modules</artifactId>
       <version>${version.org.jboss.modules}</version>
     </dependency>
     <dependency>
-        <groupId>io.netty</groupId>
-        <artifactId>netty</artifactId>
-        <version>${version.io.netty_netty}</version>
-        <scope>provided</scope>
-      </dependency>
+      <groupId>io.netty</groupId>
+      <artifactId>netty</artifactId>
+      <version>${version.io.netty_netty}</version>
+      <scope>provided</scope>
+    </dependency>
   </dependencies>
   
   <build>
@@ -129,6 +129,66 @@
                 <artifactItem>
                   <groupId>org.jboss.arquillian.daemon</groupId>
                   <artifactId>arquillian-daemon-protocol-wire</artifactId>
+                </artifactItem>
+              </artifactItems>
+            </configuration>
+          </execution>
+          <execution>
+            <id>copySW-API</id>
+            <phase>prepare-package</phase>
+            <goals>
+              <goal>copy</goal>
+            </goals>
+            <configuration>
+              <outputDirectory>${project.build.outputDirectory}/META-INF/modules/org/jboss/shrinkwrap/api/main</outputDirectory>
+              <overWriteReleases>false</overWriteReleases>
+              <overWriteSnapshots>false</overWriteSnapshots>
+              <overWriteIfNewer>true</overWriteIfNewer>
+              <stripVersion>true</stripVersion>
+              <artifactItems>
+                <artifactItem>
+                  <groupId>org.jboss.shrinkwrap</groupId>
+                  <artifactId>shrinkwrap-api</artifactId>
+                </artifactItem>
+              </artifactItems>
+            </configuration>
+          </execution>
+          <execution>
+            <id>copySW-SPI</id>
+            <phase>prepare-package</phase>
+            <goals>
+              <goal>copy</goal>
+            </goals>
+            <configuration>
+              <outputDirectory>${project.build.outputDirectory}/META-INF/modules/org/jboss/shrinkwrap/spi/main</outputDirectory>
+              <overWriteReleases>false</overWriteReleases>
+              <overWriteSnapshots>false</overWriteSnapshots>
+              <overWriteIfNewer>true</overWriteIfNewer>
+              <stripVersion>true</stripVersion>
+              <artifactItems>
+                <artifactItem>
+                  <groupId>org.jboss.shrinkwrap</groupId>
+                  <artifactId>shrinkwrap-spi</artifactId>
+                </artifactItem>
+              </artifactItems>
+            </configuration>
+          </execution>
+          <execution>
+            <id>copySW-impl</id>
+            <phase>prepare-package</phase>
+            <goals>
+              <goal>copy</goal>
+            </goals>
+            <configuration>
+              <outputDirectory>${project.build.outputDirectory}/META-INF/modules/org/jboss/shrinkwrap/impl/base/main</outputDirectory>
+              <overWriteReleases>false</overWriteReleases>
+              <overWriteSnapshots>false</overWriteSnapshots>
+              <overWriteIfNewer>true</overWriteIfNewer>
+              <stripVersion>true</stripVersion>
+              <artifactItems>
+                <artifactItem>
+                  <groupId>org.jboss.shrinkwrap</groupId>
+                  <artifactId>shrinkwrap-impl-base</artifactId>
                 </artifactItem>
               </artifactItems>
             </configuration>

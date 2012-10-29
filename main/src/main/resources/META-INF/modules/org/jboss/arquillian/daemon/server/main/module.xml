@@ -5,6 +5,9 @@
 
     <dependencies>
       <module name="org.jboss.arquillian.daemon.protocol.wire"/>
+      <module name="org.jboss.shrinkwrap.api"/>
+      <module name="org.jboss.shrinkwrap.spi"/>
+      <module name="org.jboss.shrinkwrap.impl.base"/>
       <module name="io.netty"/>
     </dependencies>
 </module>
