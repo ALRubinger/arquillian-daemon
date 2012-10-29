@@ -88,7 +88,7 @@ public class NettyServerTest {
             int read = 0;
             final byte[] buffer = new byte[1024];
             writer.print(WireProtocol.COMMAND_DEPLOY);
-
+            writer.flush();
             while ((read = archiveInstream.read(buffer, 0, buffer.length)) != -1) {
                 socketOutstream.write(buffer, 0, read);
             }
