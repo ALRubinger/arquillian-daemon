@@ -19,6 +19,7 @@ package org.jboss.arquillian.daemon.server;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.io.OutputStreamWriter;
 import java.io.PrintWriter;
@@ -69,7 +70,7 @@ public class NettyServerTest {
     }
 
     @Test
-    public void testForNorman() throws ServerLifecycleException {
+    public void testDeploy() throws ServerLifecycleException {
         final Server server = Servers.create(null, 12345);
         server.start();
 
@@ -83,23 +84,20 @@ public class NettyServerTest {
             final PrintWriter writer = new PrintWriter(new OutputStreamWriter(socketOutstream, WireProtocol.CHARSET),
                 true);
 
-            // Now write the archive
-            final InputStream archiveInstream = archive.as(ZipExporter.class).exportAsInputStream();
-            int read = 0;
-            final byte[] buffer = new byte[1024];
+            // Write the deploy command prefix and flush it
             writer.print(WireProtocol.COMMAND_DEPLOY);
-
-            while ((read = archiveInstream.read(buffer, 0, buffer.length)) != -1) {
-                socketOutstream.write(buffer, 0, read);
-            }
+            writer.flush();
+            // Now write the archive
+            archive.as(ZipExporter.class).exportTo(socketOutstream);
+            socketOutstream.flush();
             // Terminate the command
-            writer.println();
+            writer.write(WireProtocol.COMMAND_EOF_DELIMITER);
+            writer.flush();
             //
             //
-            // final InputStream responseStream = socket.getInputStream();
-            // reader = new BufferedReader(new InputStreamReader(responseStream));
-            // System.out.println("Got response from deployment: " + reader.readLine());
-            // System.out.println("Got response from deployment 2: " + reader.readLine());
+            final InputStream responseStream = socket.getInputStream();
+            reader = new BufferedReader(new InputStreamReader(responseStream));
+            System.out.println("Got response from deployment: " + reader.readLine());
 
         } catch (final UnknownHostException e) {
             // TODO Auto-generated catch block

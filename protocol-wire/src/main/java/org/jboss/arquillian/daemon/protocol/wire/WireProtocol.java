@@ -30,6 +30,7 @@ public interface WireProtocol {
 
     String COMMAND_STOP = PREFIX_STRING_COMMAND + "stop";
     String COMMAND_DEPLOY = PREFIX_DEPLOY_COMMAND;
+    String COMMAND_EOF_DELIMITER = "EOF";
     String COMMAND_UNDEPLOY = PREFIX_STRING_COMMAND + "undeploy";
 
     String RESPONSE_OK_PREFIX = "OK ";

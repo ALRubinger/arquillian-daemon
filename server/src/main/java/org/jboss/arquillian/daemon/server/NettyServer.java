@@ -19,7 +19,9 @@ package org.jboss.arquillian.daemon.server;
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufInputStream;
+import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelFuture;
+import io.netty.channel.ChannelHandler.Sharable;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundByteHandlerAdapter;
 import io.netty.channel.ChannelInboundMessageHandlerAdapter;
@@ -61,6 +63,15 @@ class NettyServer implements Server {
 
     private static final Logger log = Logger.getLogger(NettyServer.class.getName());
 
+    private static final EofDecoder EOF_DECODER;
+    static {
+        try {
+            EOF_DECODER = new EofDecoder();
+        } catch (final UnsupportedEncodingException e) {
+            throw new RuntimeException("Could not get encoding: " + WireProtocol.CHARSET, e);
+        }
+    }
+
     private final ServerBootstrap bootstrap;
     private boolean running;
     private InetSocketAddress boundAddress;
@@ -76,7 +87,7 @@ class NettyServer implements Server {
                 @Override
                 public void initChannel(final SocketChannel channel) throws Exception {
                     final ChannelPipeline pipeline = channel.pipeline();
-                    pipeline.addLast(new ActionControllerHandler());
+                    pipeline.addLast(EOF_DECODER, new ActionControllerHandler());
                 }
             }).childOption(ChannelOption.TCP_NODELAY, true).childOption(ChannelOption.SO_KEEPALIVE, true);
 
@@ -272,18 +283,8 @@ class NettyServer implements Server {
         @Override
         public void inboundBufferUpdated(final ChannelHandlerContext ctx, final ByteBuf in) throws Exception {
             try {
-                log.info("using the DeployHandlerAdapter");
+                log.info("using the " + this.getClass().getSimpleName());
                 final InputStream instream = new ByteBufInputStream(in);
-
-                // final File file = new File("/home/alr/Desktop/something.jar");
-                // final OutputStream fileout = new FileOutputStream(file);
-                // int read = 0;
-                // final byte[] buffer = new byte[1024];
-                //
-                // while ((read = instream.read(buffer, 0, buffer.length)) != -1) {
-                // fileout.write(buffer, 0, read);
-                // }
-                // fileout.close();
 
                 final Set<ClassLoader> classloaders = new HashSet<ClassLoader>(1);
                 classloaders.add(NettyServer.class.getClassLoader());
@@ -300,9 +301,10 @@ class NettyServer implements Server {
             } finally {
 
                 final ChannelPipeline pipeline = ctx.pipeline();
+                log.info("Pipeline from DeployHandler: " + pipeline);
+                pipeline.addLast(EOF_DECODER);
                 pipeline.addLast(new ActionControllerHandler());
                 pipeline.remove(this);
-
             }
         }
 
@@ -341,30 +343,30 @@ class NettyServer implements Server {
                 pipeline.addLast(new DelimiterBasedFrameDecoder(80, Delimiters.lineDelimiter()), new StringDecoder(
                     Charset.forName(WireProtocol.CHARSET)), new StringCommandHandler());
                 pipeline.remove(this);
-
             }
             // Deploy command?
             else if (this.isDeployCommand(magic1, magic2, magic3)) {
-                log.info("DEPLOY COMMAND received");
-                // Set the writer index so we strip out the command portion, leaving only the bytes containing the
-                // archive
-                in.readerIndex(in.readerIndex() + WireProtocol.PREFIX_DEPLOY_COMMAND.length());
-                // in.writerIndex(WireProtocol.PREFIX_DEPLOY_COMMAND.length() - 1);
+                // Set the reader index so we strip out the command portion, leaving only the bytes containing the
+                // archive (the frame decoder will strip off the EOF delimiter)
+                in.readerIndex(in.readerIndex() + WireProtocol.COMMAND_DEPLOY.length());
 
-                // Adjust the pipeline such that we use the deploy handler
-                // pipeline.addLast(new DelimiterBasedFrameDecoder(Integer.MAX_VALUE, Delimiters.lineDelimiter()));
+                // Adjust the pipeline such that we use the deploy handler only
                 pipeline.addLast(new DeployHandlerAdapter());
                 pipeline.remove(this);
-
+                pipeline.remove(EOF_DECODER);
+                log.info(pipeline.toString());
             } else {
                 // Unknown command/protocol
+                log.info("UNKNOWN COMMAND");
                 in.clear();
                 ctx.close();
                 return;
             }
 
-            // Write the bytes again and re-fire so the updated handlers in the pipeline can have a go at it
-            ctx.nextInboundByteBuffer().writeBytes(in);
+            // Write the bytes to the next inbound buffer and re-fire so the updated handlers in the pipeline can have a
+            // go at it
+            final ByteBuf nextInboundByteBuffer = ctx.nextInboundByteBuffer();
+            nextInboundByteBuffer.writeBytes(in);
             pipeline.fireInboundBufferUpdated();
 
             // Archive deployment?
@@ -405,6 +407,20 @@ class NettyServer implements Server {
                 && magic3 == WireProtocol.PREFIX_DEPLOY_COMMAND.charAt(2);
         }
 
+    }
+
+    /**
+     * {@link DelimiterBasedFrameDecoder} implementation to use the {@link WireProtocol#COMMAND_EOF_DELIMITER},
+     * stripping it from the buffer. Is {@link Sharable} to allow this to be added/removed more than once.
+     *
+     * @author <a href="mailto:alr@jboss.org">Andrew Lee Rubinger</a>
+     */
+    @Sharable
+    private static final class EofDecoder extends DelimiterBasedFrameDecoder {
+        public EofDecoder() throws UnsupportedEncodingException {
+            super(Integer.MAX_VALUE, true, Unpooled.wrappedBuffer(WireProtocol.COMMAND_EOF_DELIMITER
+                .getBytes(WireProtocol.CHARSET)));
+        }
     }
 
 }
