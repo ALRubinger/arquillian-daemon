@@ -20,12 +20,12 @@ import java.io.BufferedReader;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.io.OutputStreamWriter;
 import java.io.PrintWriter;
 import java.lang.ProcessBuilder.Redirect;
 import java.net.Socket;
-import java.net.UnknownHostException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
@@ -138,69 +138,35 @@ public class ManagedDaemonDeployableContainer implements DeployableContainer<Man
     @Override
     public ProtocolMetaData deploy(final Archive<?> archive) throws DeploymentException {
 
-        // final Bootstrap bootstrap = new Bootstrap();
-        //
-        // bootstrap.group(new NioEventLoopGroup()).channel(NioSocketChannel.class)
-        // .remoteAddress(new InetSocketAddress("localhost", 12345)).handler(new ChannelInitializer<SocketChannel>() {
-        // @Override
-        // public void initChannel(final SocketChannel channel) throws Exception {
-        // final ChannelPipeline pipeline = channel.pipeline();
-        // // Decoders
-        // // pipeline.addLast("frameDecoderClient",
-        // // new DelimiterBasedFrameDecoder(80, Delimiters.nulDelimiter()));
-        // // pipeline.addLast("base64DecoderClient", new Base64Decoder());
-        //
-        // // Encoder
-        // // pipeline.addLast("base64EncoderClient", new Base64Encoder());
-        // // pipeline.addLast("mine", new ObjectEncoder());
-        //
-        // }
-        //
-        // });
-        //
-        // final Channel channel;
-        // try {
-        // channel = bootstrap.connect().sync().channel();
-        // final ChannelFuture future = channel.write(archive);
-        // future.await();
-        // } catch (final InterruptedException e) {
-        // Thread.interrupted();
-        // }
-
         Socket socket = null;
         BufferedReader reader = null;
         try {
+            // TODO Socket address from props
             socket = new Socket("localhost", 12345);
             final OutputStream socketOutstream = socket.getOutputStream();
             final PrintWriter writer = new PrintWriter(new OutputStreamWriter(socketOutstream, WireProtocol.CHARSET),
                 true);
 
-            // Now write the archive
-            final InputStream archiveInstream = archive.as(ZipExporter.class).exportAsInputStream();
-            int read = 0;
-            final byte[] buffer = new byte[1024];
+            // Write the deploy command prefix and flush it
             writer.print(WireProtocol.COMMAND_DEPLOY);
-            // while ((read = archiveInstream.read(buffer, 0, buffer.length)) != -1) {
-            // socketOutstream.write(buffer, 0, read);
-            // System.out.println("Wrote: " + read);
-            // }
-            // Terminate the command
-            writer.println();
+            writer.flush();
+            // Now write the archive
+            archive.as(ZipExporter.class).exportTo(socketOutstream);
             socketOutstream.flush();
-            System.out.println("all she wrote on the client");
+            // Terminate the command
+            writer.write(WireProtocol.COMMAND_EOF_DELIMITER);
+            writer.flush();
+            // Read and check the response
+            final InputStream responseStream = socket.getInputStream();
+            reader = new BufferedReader(new InputStreamReader(responseStream));
+            final String response = reader.readLine();
+            if (!response.startsWith(WireProtocol.RESPONSE_OK_PREFIX)) {
+                throw new DeploymentException("Did not receive proper response from the server, instead was: "
+                    + response);
+            }
 
-            // writer.println(WireProtocol.COMMAND_STOP);
-            // final InputStream in = socket.getInputStream();
-            // reader = new BufferedReader(new InputStreamReader(in));
-            // final String response = reader.readLine();
-            // System.out.println("Client got response: " + response);
-
-        } catch (final UnknownHostException e) {
-            // TODO Auto-generated catch block
-            e.printStackTrace();
-        } catch (final IOException e) {
-            // TODO Auto-generated catch block
-            e.printStackTrace();
+        } catch (final IOException ioe) {
+            throw new DeploymentException("I/O problem encountered during deployment", ioe);
         } finally {
             if (socket != null) {
                 try {
@@ -215,7 +181,6 @@ public class ManagedDaemonDeployableContainer implements DeployableContainer<Man
                 }
             }
         }
-
         // TODO
         throw new UnsupportedOperationException("TBD");
     }

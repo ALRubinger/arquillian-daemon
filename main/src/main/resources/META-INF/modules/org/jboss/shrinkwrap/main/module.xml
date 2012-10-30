@@ -1,0 +1,11 @@
+<module xmlns="urn:jboss:module:1.1" name="org.jboss.shrinkwrap">
+    <resources>
+        <resource-root path="shrinkwrap-api.jar" />
+        <resource-root path="shrinkwrap-spi.jar" />
+        <resource-root path="shrinkwrap-impl-base.jar" />
+    </resources>
+    
+    <dependencies>
+      
+    </dependencies>
+</module>

@@ -36,11 +36,11 @@ import io.netty.handler.codec.DelimiterBasedFrameDecoder;
 import io.netty.handler.codec.Delimiters;
 import io.netty.handler.codec.string.StringDecoder;
 
-import java.io.BufferedReader;
 import java.io.InputStream;
-import java.io.InputStreamReader;
 import java.io.UnsupportedEncodingException;
 import java.net.InetSocketAddress;
+import java.net.URL;
+import java.net.URLClassLoader;
 import java.nio.charset.Charset;
 import java.util.HashSet;
 import java.util.Set;
@@ -300,24 +300,51 @@ class NettyServer implements Server {
         @Override
         public void inboundBufferUpdated(final ChannelHandlerContext ctx, final ByteBuf in) throws Exception {
             try {
-                log.info("using the " + this.getClass().getSimpleName());
+                if (log.isLoggable(Level.FINEST)) {
+                    log.finest("Using the " + this.getClass().getSimpleName());
+                }
                 final InputStream instream = new ByteBufInputStream(in);
-
+                final ClassLoader thisCl = NettyServer.class.getClassLoader();
                 final Set<ClassLoader> classloaders = new HashSet<ClassLoader>(1);
-                classloaders.add(NettyServer.class.getClassLoader());
-                log.info("Using ClassLoader: " + NettyServer.class.getClassLoader());
+                final ClassLoader newCl = new URLClassLoader(new URL[] {}, thisCl);
+                classloaders.add(newCl);
+                if (log.isLoggable(Level.FINEST)) {
+                    log.finest("Using ClassLoader: " + newCl);
+                }
                 final Domain domain = ShrinkWrap.createDomain(new ConfigurationBuilder().classLoaders(classloaders));
                 final GenericArchive archive = domain.getArchiveFactory().create(ZipImporter.class)
                     .importFrom(instream).as(GenericArchive.class);
                 instream.close();
                 // Tell the client OK
                 final ByteBuf out = ctx.nextOutboundByteBuffer();
+                if (log.isLoggable(Level.FINEST)) {
+                    log.finest("Got archive: " + archive.toString(true));
+                }
+                // TODO Remove
                 log.info("Got archive: " + archive.toString(true));
                 NettyServer.sendResponse(ctx, out, WireProtocol.RESPONSE_OK_PREFIX + WireProtocol.COMMAND_DEPLOY);
+            } catch (final Throwable e) {
+                e.printStackTrace();
+                throw new RuntimeException(e);
             } finally {
-
                 NettyServer.this.resetPipeline(ctx.pipeline(), this);
             }
+        }
+
+        /**
+         *
+         * @see io.netty.channel.ChannelStateHandlerAdapter#exceptionCaught(io.netty.channel.ChannelHandlerContext,
+         *      java.lang.Throwable)
+         */
+        @Override
+        public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
+
+            // Log at warning
+            if (log.isLoggable(Level.WARNING)) {
+                log.warning("Got exception while server is not running: " + cause.getMessage());
+            }
+            super.exceptionCaught(ctx, cause);
+
         }
 
     }
@@ -374,13 +401,6 @@ class NettyServer implements Server {
                 return;
             }
 
-            final InputStream instream = new ByteBufInputStream(in);
-            final BufferedReader reader = new BufferedReader(new InputStreamReader(instream));
-            final String line = reader.readLine();
-            log.info(line);
-            reader.close();
-            in.readerIndex(0);
-
             // Write the bytes to the next inbound buffer and re-fire so the updated handlers in the pipeline can have a
             // go at it
             final ByteBuf nextInboundByteBuffer = ctx.nextInboundByteBuffer();
@@ -394,6 +414,17 @@ class NettyServer implements Server {
             // new StringCommandHandler());
             // new StringDecoder()
 
+        }
+
+        /**
+         * Returns to the client that some error was encountered
+         *
+         * @see io.netty.channel.ChannelStateHandlerAdapter#exceptionCaught(io.netty.channel.ChannelHandlerContext,
+         *      java.lang.Throwable)
+         */
+        @Override
+        public void exceptionCaught(final ChannelHandlerContext ctx, final Throwable cause) throws Exception {
+            NettyServer.this.sendResponse(ctx, ctx.nextOutboundByteBuffer(), cause.getMessage());
         }
 
         /**

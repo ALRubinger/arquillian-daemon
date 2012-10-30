@@ -25,6 +25,7 @@
 
     <!-- Versioning -->
     <version.org.jboss.arquillian.core>1.0.3.Final</version.org.jboss.arquillian.core>
+    <version.org.jboss.shrinkwrap>1.1.1-alpha-1</version.org.jboss.shrinkwrap>
     <version.junit_junit>4.8.2</version.junit_junit>
     <version.org.apache.maven.plugins_maven-site-plugin>3.0-beta-3</version.org.apache.maven.plugins_maven-site-plugin>
 
@@ -227,6 +228,26 @@
         <type>pom</type>
         <scope>import</scope>
       </dependency>
+      
+      <!-- SHRINKWRAP-430 needs to be manually included, remove when this version is in the ARQ BOM -->
+      <dependency>
+        <groupId>org.jboss.shrinkwrap</groupId>
+        <artifactId>shrinkwrap-api</artifactId>
+        <version>${version.org.jboss.shrinkwrap}</version>
+      </dependency>
+      <dependency>
+        <groupId>org.jboss.shrinkwrap</groupId>
+        <artifactId>shrinkwrap-spi</artifactId>
+        <version>${version.org.jboss.shrinkwrap}</version>
+        <scope>provided</scope>
+      </dependency>
+      <dependency>
+        <groupId>org.jboss.shrinkwrap</groupId>
+        <artifactId>shrinkwrap-impl-base</artifactId>
+        <version>${version.org.jboss.shrinkwrap}</version>
+        <scope>provided</scope>
+      </dependency>
+      
       <dependency>
         <groupId>junit</groupId>
         <artifactId>junit</artifactId>

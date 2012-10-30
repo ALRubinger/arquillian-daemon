@@ -34,6 +34,5 @@ public interface WireProtocol {
     String COMMAND_UNDEPLOY = PREFIX_STRING_COMMAND + "undeploy";
 
     String RESPONSE_OK_PREFIX = "OK ";
-    String RESPONSE_EXCEPTION_PREFIX = "ERR ";
 
 }
