@@ -24,7 +24,7 @@ import java.io.OutputStream;
 import java.io.OutputStreamWriter;
 import java.io.PrintWriter;
 import java.net.Socket;
-import java.net.UnknownHostException;
+import java.util.logging.Logger;
 
 import org.jboss.arquillian.daemon.protocol.wire.WireProtocol;
 import org.jboss.shrinkwrap.api.ShrinkWrap;
@@ -39,6 +39,45 @@ import org.junit.Test;
  * @author <a href="mailto:alr@jboss.org">Andrew Lee Rubinger</a>
  */
 public class NettyServerTest {
+
+    private static final Logger log = Logger.getLogger(NettyServerTest.class.getName());
+
+    @Test
+    public void isNotRunningAfterCreate() throws ServerLifecycleException {
+        final Server server = Servers.create(null, 0);
+        Assert.assertFalse(server.isRunning());
+    }
+
+    @Test
+    public void start() throws ServerLifecycleException {
+        final Server server = Servers.create(null, 0);
+        server.start();
+        Assert.assertTrue(server.isRunning());
+        server.stop();
+    }
+
+    @Test
+    public void stop() throws ServerLifecycleException {
+        final Server server = Servers.create(null, 0);
+        server.start();
+        server.stop();
+        Assert.assertFalse(server.isRunning());
+    }
+
+    @Test
+    public void restart() throws ServerLifecycleException {
+        final Server server = Servers.create(null, 0);
+        try {
+            server.start();
+            server.stop();
+            server.start();
+            Assert.assertTrue(server.isRunning());
+        } finally {
+            if (server.isRunning()) {
+                server.stop();
+            }
+        }
+    }
 
     @Test
     public void startProhibitedIfRunning() throws ServerLifecycleException {
@@ -70,10 +109,13 @@ public class NettyServerTest {
     }
 
     @Test
-    public void testDeploy() throws ServerLifecycleException {
+    public void deploy() throws Exception {
+
+        // Create the server
         final Server server = Servers.create(null, 12345);
         server.start();
 
+        // Make an archive
         final JavaArchive archive = ShrinkWrap.create(JavaArchive.class, "myarchive.jar").addClass(this.getClass());
 
         Socket socket = null;
@@ -93,18 +135,12 @@ public class NettyServerTest {
             // Terminate the command
             writer.write(WireProtocol.COMMAND_EOF_DELIMITER);
             writer.flush();
-            //
-            //
+            // Read and check the response
             final InputStream responseStream = socket.getInputStream();
             reader = new BufferedReader(new InputStreamReader(responseStream));
-            System.out.println("Got response from deployment: " + reader.readLine());
-
-        } catch (final UnknownHostException e) {
-            // TODO Auto-generated catch block
-            e.printStackTrace();
-        } catch (final IOException e) {
-            // TODO Auto-generated catch block
-            e.printStackTrace();
+            final String response = reader.readLine();
+            log.info("Got response: " + response);
+            Assert.assertTrue(response.startsWith(WireProtocol.RESPONSE_OK_PREFIX));
         } finally {
             if (socket != null) {
                 try {
@@ -118,8 +154,69 @@ public class NettyServerTest {
                 } catch (final IOException ignore) {
                 }
             }
+
+            // Stop
+            server.stop();
         }
 
-        server.stop();
+    }
+
+    @Test
+    public void stopOverWireProtocol() throws Exception {
+
+        // Create the server
+        final Server server = Servers.create(null, 12345);
+        server.start();
+
+        Socket socket = null;
+        BufferedReader reader = null;
+        try {
+            socket = new Socket("localhost", 12345);
+            final OutputStream socketOutstream = socket.getOutputStream();
+            final PrintWriter writer = new PrintWriter(new OutputStreamWriter(socketOutstream, WireProtocol.CHARSET),
+                true);
+
+            // Write the deploy command prefix and flush it
+            writer.print(WireProtocol.COMMAND_STOP);
+            writer.print(WireProtocol.COMMAND_EOF_DELIMITER);
+            writer.flush();
+            // Read and check the response
+            final InputStream responseStream = socket.getInputStream();
+            reader = new BufferedReader(new InputStreamReader(responseStream));
+            final String response = reader.readLine();
+            log.info("Got response: " + response);
+            Assert.assertTrue(response.startsWith(WireProtocol.RESPONSE_OK_PREFIX));
+
+            final long current = System.currentTimeMillis();
+            // Try for 10s
+            while (current < current + (10 * 1000)) {
+                if (!server.isRunning()) {
+                    log.info("Server shutdown over wire protocol");
+                    return;
+                }
+                Thread.sleep(300);
+            }
+            Assert.fail("Server did not shut down via wire protocol request in the alloted time");
+
+        } finally {
+            if (socket != null) {
+                try {
+                    socket.close();
+                } catch (final IOException ignore) {
+                }
+            }
+            if (reader != null) {
+                try {
+                    reader.close();
+                } catch (final IOException ignore) {
+                }
+            }
+
+            // Stop
+            if (server.isRunning()) {
+                server.stop();
+            }
+        }
+
     }
 }

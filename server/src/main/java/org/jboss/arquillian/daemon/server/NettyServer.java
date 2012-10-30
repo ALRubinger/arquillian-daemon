@@ -24,6 +24,7 @@ import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelHandler.Sharable;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundByteHandlerAdapter;
+import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.ChannelInboundMessageHandlerAdapter;
 import io.netty.channel.ChannelInitializer;
 import io.netty.channel.ChannelOption;
@@ -35,12 +36,17 @@ import io.netty.handler.codec.DelimiterBasedFrameDecoder;
 import io.netty.handler.codec.Delimiters;
 import io.netty.handler.codec.string.StringDecoder;
 
+import java.io.BufferedReader;
 import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.io.UnsupportedEncodingException;
 import java.net.InetSocketAddress;
 import java.nio.charset.Charset;
 import java.util.HashSet;
 import java.util.Set;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.logging.Handler;
 import java.util.logging.Level;
 import java.util.logging.LogRecord;
@@ -63,6 +69,7 @@ class NettyServer implements Server {
 
     private static final Logger log = Logger.getLogger(NettyServer.class.getName());
 
+    private ExecutorService shutdownService;
     private static final EofDecoder EOF_DECODER;
     static {
         try {
@@ -72,27 +79,15 @@ class NettyServer implements Server {
         }
     }
 
-    private final ServerBootstrap bootstrap;
+    private ServerBootstrap bootstrap;
     private boolean running;
     private InetSocketAddress boundAddress;
+    private final InetSocketAddress toBindAddress;
 
     NettyServer(final InetSocketAddress bindAddress) {
         // Precondition checks
         assert bindAddress != null : "Bind address must be specified";
-
-        // Set up Netty Boostrap
-        final ServerBootstrap bootstrap = new ServerBootstrap().group(new NioEventLoopGroup(), new NioEventLoopGroup())
-            .channel(NioServerSocketChannel.class).localAddress(bindAddress)
-            .childHandler(new ChannelInitializer<SocketChannel>() {
-                @Override
-                public void initChannel(final SocketChannel channel) throws Exception {
-                    final ChannelPipeline pipeline = channel.pipeline();
-                    pipeline.addLast(EOF_DECODER, new ActionControllerHandler());
-                }
-            }).childOption(ChannelOption.TCP_NODELAY, true).childOption(ChannelOption.SO_KEEPALIVE, true);
-
-        // Set
-        this.bootstrap = bootstrap;
+        this.toBindAddress = bindAddress;
     }
 
     /**
@@ -107,6 +102,18 @@ class NettyServer implements Server {
         if (this.isRunning()) {
             throw new IllegalStateException("Already running");
         }
+
+        // Set up Netty Boostrap
+        final ServerBootstrap bootstrap = new ServerBootstrap().group(new NioEventLoopGroup(), new NioEventLoopGroup())
+            .channel(NioServerSocketChannel.class).localAddress(this.toBindAddress)
+            .childHandler(new ChannelInitializer<SocketChannel>() {
+                @Override
+                public void initChannel(final SocketChannel channel) throws Exception {
+                    final ChannelPipeline pipeline = channel.pipeline();
+                    NettyServer.this.resetPipeline(pipeline);
+                }
+            }).childOption(ChannelOption.TCP_NODELAY, true).childOption(ChannelOption.SO_KEEPALIVE, true);
+        this.bootstrap = bootstrap;
 
         // Start 'er up
         final ChannelFuture openChannel;
@@ -126,6 +133,8 @@ class NettyServer implements Server {
         }
         // Running
         running = true;
+        // Create the shutdown service
+        this.shutdownService = Executors.newSingleThreadExecutor();
     }
 
     /**
@@ -136,7 +145,6 @@ class NettyServer implements Server {
     @Override
     public boolean isRunning() {
         return running;
-
     }
 
     /**
@@ -179,6 +187,8 @@ class NettyServer implements Server {
 
         // Shutdown
         bootstrap.shutdown();
+        shutdownService.shutdownNow();
+        shutdownService = null;
 
         // Not running
         running = false;
@@ -227,10 +237,18 @@ class NettyServer implements Server {
 
                     // Tell the client OK
                     final ByteBuf out = ctx.nextOutboundByteBuffer();
-                    NettyServer.sendResponse(ctx, out, WireProtocol.RESPONSE_OK_PREFIX);
+                    NettyServer.sendResponse(ctx, out, WireProtocol.RESPONSE_OK_PREFIX + message);
 
-                    // Now stop (after we send the response, else we'll prematurely close the connection)
-                    NettyServer.this.stop();
+                    // Now stop in another thread (after we send the response, else we'll prematurely close the
+                    // connection)
+                    shutdownService.submit(new Callable<Void>() {
+                        @Override
+                        public Void call() throws Exception {
+                            NettyServer.this.stop();
+                            return null;
+                        }
+                    });
+
                 }
                 // Unsupported command
                 else {
@@ -238,8 +256,7 @@ class NettyServer implements Server {
                 }
             } finally {
                 final ChannelPipeline pipeline = ctx.pipeline();
-                pipeline.addLast(new ActionControllerHandler());
-                pipeline.remove(this);
+                NettyServer.this.resetPipeline(pipeline, this);
             }
 
         }
@@ -295,16 +312,11 @@ class NettyServer implements Server {
                 instream.close();
                 // Tell the client OK
                 final ByteBuf out = ctx.nextOutboundByteBuffer();
-
                 log.info("Got archive: " + archive.toString(true));
                 NettyServer.sendResponse(ctx, out, WireProtocol.RESPONSE_OK_PREFIX + WireProtocol.COMMAND_DEPLOY);
             } finally {
 
-                final ChannelPipeline pipeline = ctx.pipeline();
-                log.info("Pipeline from DeployHandler: " + pipeline);
-                pipeline.addLast(EOF_DECODER);
-                pipeline.addLast(new ActionControllerHandler());
-                pipeline.remove(this);
+                NettyServer.this.resetPipeline(ctx.pipeline(), this);
             }
         }
 
@@ -334,15 +346,15 @@ class NettyServer implements Server {
             final int magic2 = in.getUnsignedByte(readerIndex + 1);
             final int magic3 = in.getUnsignedByte(readerIndex + 2);
 
-            log.info(new String(new byte[] { (byte) magic1, (byte) magic2, (byte) magic3 }, Charset
-                .forName(WireProtocol.CHARSET)));
-
             // String-based Command?
             if (this.isStringCommand(magic1, magic2, magic3)) {
+                // Write a line break into the buffer so we mark the frame
+                in.writeBytes(Delimiters.lineDelimiter()[0]);
                 // Adjust the pipeline such that we use the command handler
                 pipeline.addLast(new DelimiterBasedFrameDecoder(80, Delimiters.lineDelimiter()), new StringDecoder(
                     Charset.forName(WireProtocol.CHARSET)), new StringCommandHandler());
                 pipeline.remove(this);
+                pipeline.remove(EOF_DECODER);
             }
             // Deploy command?
             else if (this.isDeployCommand(magic1, magic2, magic3)) {
@@ -354,7 +366,6 @@ class NettyServer implements Server {
                 pipeline.addLast(new DeployHandlerAdapter());
                 pipeline.remove(this);
                 pipeline.remove(EOF_DECODER);
-                log.info(pipeline.toString());
             } else {
                 // Unknown command/protocol
                 log.info("UNKNOWN COMMAND");
@@ -362,6 +373,13 @@ class NettyServer implements Server {
                 ctx.close();
                 return;
             }
+
+            final InputStream instream = new ByteBufInputStream(in);
+            final BufferedReader reader = new BufferedReader(new InputStreamReader(instream));
+            final String line = reader.readLine();
+            log.info(line);
+            reader.close();
+            in.readerIndex(0);
 
             // Write the bytes to the next inbound buffer and re-fire so the updated handlers in the pipeline can have a
             // go at it
@@ -407,6 +425,14 @@ class NettyServer implements Server {
                 && magic3 == WireProtocol.PREFIX_DEPLOY_COMMAND.charAt(2);
         }
 
+    }
+
+    private void resetPipeline(final ChannelPipeline pipeline, final ChannelInboundHandlerAdapter... toRemove) {
+        pipeline.addLast(EOF_DECODER);
+        pipeline.addLast(new ActionControllerHandler());
+        for (final ChannelInboundHandlerAdapter adapter : toRemove) {
+            pipeline.remove(adapter);
+        }
     }
 
     /**
