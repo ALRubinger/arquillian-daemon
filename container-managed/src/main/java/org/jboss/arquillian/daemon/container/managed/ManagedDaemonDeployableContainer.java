@@ -30,8 +30,6 @@ import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -56,7 +54,6 @@ public class ManagedDaemonDeployableContainer implements DeployableContainer<Man
     private static final String ERROR_MESSAGE_DESCRIPTORS_UNSUPPORTED = "Descriptor deployment not supported";
 
     private Thread shutdownThread;
-    private final ExecutorService executorService = Executors.newCachedThreadPool();
 
     private InetSocketAddress remoteAddress;
     private Socket socket;
@@ -65,6 +62,7 @@ public class ManagedDaemonDeployableContainer implements DeployableContainer<Man
     private BufferedReader reader;
     private PrintWriter writer;
     private String deploymentName;
+    private Process remoteProcess;
 
     /**
      * {@inheritDoc}
@@ -106,6 +104,7 @@ public class ManagedDaemonDeployableContainer implements DeployableContainer<Man
         final Process process;
         try {
             process = processBuilder.start();
+            this.remoteProcess = process;
         } catch (final IOException e) {
             throw new LifecycleException("Could not start container", e);
         }
@@ -156,7 +155,7 @@ public class ManagedDaemonDeployableContainer implements DeployableContainer<Man
                         Thread.sleep(200);
                     } catch (final InterruptedException e) {
                         Thread.interrupted();
-                        throw new RuntimeException("No one should be interrupting us waiting to connect", e);
+                        throw new RuntimeException("No one should be interrupting us while we're waiting to connect", e);
                     }
                 }
             }
@@ -175,19 +174,44 @@ public class ManagedDaemonDeployableContainer implements DeployableContainer<Man
             this.closeRemoteResources();
             throw new LifecycleException("Could not open connection to remote process", ioe);
         }
-
-        // TODO Instead do a loop where we check isRunning
-        try {
-            Thread.sleep(1000);
-        } catch (final InterruptedException e) {
-            Thread.interrupted();
-        }
     }
 
     @Override
     public void stop() throws LifecycleException {
-        this.closeRemoteResources();
-        executorService.shutdownNow();
+
+        try {
+            // Write the stop command
+            writer.print(WireProtocol.COMMAND_STOP);
+            // Terminate the command and flush
+            writer.print(WireProtocol.COMMAND_EOF_DELIMITER);
+            writer.flush();
+
+            // Block until we get "OK" response
+            final String response = reader.readLine();
+            if (log.isLoggable(Level.FINEST)) {
+                log.finest("Response from stop: " + response);
+            }
+
+            log.info("Response from stop: " + response);
+
+            // Block until the process is killed
+            try {
+                remoteProcess.waitFor();
+            } catch (final InterruptedException ie) {
+                Thread.interrupted();
+            }
+            // Null out
+            remoteProcess = null;
+
+        } catch (final IOException ioe) {
+            throw new LifecycleException(
+                "Unexpected problem encountered during read of the response from stop request", ioe);
+        } catch (final RuntimeException re) {
+            throw new LifecycleException("Unexpected problem encountered during stop", re);
+        } finally {
+            // Always close up
+            this.closeRemoteResources();
+        }
     }
 
     /**
@@ -312,27 +336,32 @@ public class ManagedDaemonDeployableContainer implements DeployableContainer<Man
                 reader.close();
             } catch (final IOException ignore) {
             }
+            reader = null;
         }
         if (writer != null) {
             writer.close();
+            writer = null;
         }
         if (socketOutstream != null) {
             try {
                 socketOutstream.close();
             } catch (final IOException ignore) {
             }
+            socketOutstream = null;
         }
         if (socketInstream != null) {
             try {
                 socketInstream.close();
             } catch (final IOException ignore) {
             }
+            socketInstream = null;
         }
         if (socket != null) {
             try {
                 socket.close();
             } catch (final IOException ignore) {
             }
+            socket = null;
         }
 
     }
