@@ -16,6 +16,8 @@
  */
 package org.jboss.arquillian.daemon.protocol.arquillian;
 
+import java.util.logging.Logger;
+
 import org.jboss.arquillian.container.test.spi.ContainerMethodExecutor;
 import org.jboss.arquillian.test.spi.TestMethodExecutor;
 import org.jboss.arquillian.test.spi.TestResult;
@@ -23,9 +25,18 @@ import org.jboss.arquillian.test.spi.TestResult;
 /**
  * @author <a href="mailto:alr@jboss.org">Andrew Lee Rubinger</a>
  */
-public enum DaemonMethodExecutor implements ContainerMethodExecutor {
+public class DaemonMethodExecutor implements ContainerMethodExecutor {
 
-    INSTANCE;
+    private static final Logger log = Logger.getLogger(DaemonMethodExecutor.class.getName());
+
+    private final DeploymentContext context;
+
+    DaemonMethodExecutor(final DeploymentContext context) {
+        if (context == null) {
+            throw new IllegalArgumentException("deployment context must be specified");
+        }
+        this.context = context;
+    }
 
     /**
      * {@inheritDoc}
@@ -35,7 +46,7 @@ public enum DaemonMethodExecutor implements ContainerMethodExecutor {
     @Override
     public TestResult invoke(final TestMethodExecutor testMethodExecutor) {
 
-        assert testMethodExecutor == null : "Test method executor is required";
+        assert testMethodExecutor != null : "Test method executor is required";
         final TestResult testResult = new TestResult();
 
         // Invoke
@@ -43,6 +54,7 @@ public enum DaemonMethodExecutor implements ContainerMethodExecutor {
         final long startTime = System.currentTimeMillis();
         final long endTime;
         try {
+            // TODO This is going local, need to bridge to the server
             testMethodExecutor.invoke();
         } catch (final Throwable t) {
             throwable = t;

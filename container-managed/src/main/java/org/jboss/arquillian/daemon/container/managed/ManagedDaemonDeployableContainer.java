@@ -76,18 +76,15 @@ public class ManagedDaemonDeployableContainer implements DeployableContainer<Man
 
     @Override
     public void setup(final ManagedDaemonContainerConfiguration configuration) {
-        // TODO Auto-generated method stub
+        final String remoteHost = configuration.getHost();
+        final String remotePort = configuration.getPort();
+        final InetSocketAddress address = new InetSocketAddress(remoteHost, Integer.parseInt(remotePort));
+        this.remoteAddress = address;
 
     }
 
     @Override
     public void start() throws LifecycleException {
-
-        // TODO Get from properties
-        final String remoteHost = "localhost";
-        final String remotePort = "12345";
-        final InetSocketAddress address = new InetSocketAddress(remoteHost, Integer.parseInt(remotePort));
-        this.remoteAddress = address;
 
         final File file = new File("target/arquillian-daemon-main.jar"); // TODO Props
         final File javaHome = new File(System.getProperty("java.home")); // TODO Security Action
@@ -95,8 +92,8 @@ public class ManagedDaemonDeployableContainer implements DeployableContainer<Man
         command.add(javaHome.getAbsolutePath() + "/bin/java");
         command.add("-jar");
         command.add(file.getAbsolutePath());
-        command.add(address.getHostString());
-        command.add(Integer.toString(address.getPort()));
+        command.add(remoteAddress.getHostString());
+        command.add(Integer.toString(remoteAddress.getPort()));
 
         final ProcessBuilder processBuilder = new ProcessBuilder(command);
         processBuilder.redirectErrorStream(true);
@@ -269,8 +266,9 @@ public class ManagedDaemonDeployableContainer implements DeployableContainer<Man
 
         // Create and return ProtocolMetaData
         final ProtocolMetaData pmd = new ProtocolMetaData();
-        final DeploymentContext socketContext = DeploymentContext.create(deploymentName, remoteAddress);
-        pmd.addContext(socketContext);
+        final DeploymentContext deploymentContext = DeploymentContext.create(deploymentName, socketInstream,
+            socketOutstream, reader, writer);
+        pmd.addContext(deploymentContext);
         return pmd;
     }
 

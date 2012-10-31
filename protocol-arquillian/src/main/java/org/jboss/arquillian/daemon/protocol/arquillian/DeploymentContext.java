@@ -16,54 +16,98 @@
  */
 package org.jboss.arquillian.daemon.protocol.arquillian;
 
-import java.net.InetSocketAddress;
+import java.io.BufferedReader;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.io.PrintWriter;
 
 import org.jboss.arquillian.container.spi.client.protocol.metadata.NamedContext;
 
 /**
- * Immutable {@link NamedContext} implementation backed by an {@link InetSocketAddress}
+ * {@link NamedContext} implementation backed by streams and reader/writer to interact with the Arquillian Server Daemon
+ * over wire protocol. No caller should close any of the resources in this {@link DeploymentContext}; they are to be
+ * managed by the establishing container.
  *
  * @author <a href="mailto:alr@jboss.org">Andrew Lee Rubinger</a>
  */
 public class DeploymentContext extends NamedContext {
 
-    private final InetSocketAddress address;
+    private final InputStream socketInstream;
+    private final OutputStream socketOutstream;
+    private final BufferedReader reader;
+    private final PrintWriter writer;
 
-    private DeploymentContext(final String deploymentName, final InetSocketAddress address) {
+    private DeploymentContext(final String deploymentName, final InputStream socketInstream,
+        final OutputStream socketOutstream, final BufferedReader reader, final PrintWriter writer) {
         super(deploymentName);
-        this.address = address;
+        this.socketInstream = socketInstream;
+        this.socketOutstream = socketOutstream;
+        this.reader = reader;
+        this.writer = writer;
     }
 
     /**
-     * Creates and returns a new {@link DeploymentContext} instance
+     * Creates and returns a new {@link DeploymentContext} instance from the required arguments
      *
      * @param deploymentName
      *            Name of the deployment
-     * @param address
+     * @param socketInstream
+     * @param socketOutstream
+     * @param reader
+     * @param writer
      * @return
      * @throws IllegalArgumentException
-     *             If the deployment name is not specified, or if the address is not specified or is unresolved
+     *             If any argument is not specified
      */
-    public static DeploymentContext create(final String deploymentName, final InetSocketAddress address)
+    public static DeploymentContext create(final String deploymentName, final InputStream socketInstream,
+        final OutputStream socketOutstream, final BufferedReader reader, final PrintWriter writer)
         throws IllegalArgumentException {
         if (deploymentName == null || deploymentName.length() == 0) {
             throw new IllegalArgumentException("Deployment name must be specified");
         }
-        if (address == null) {
-            throw new IllegalArgumentException("socket must be specified");
+        if (socketInstream == null) {
+            throw new IllegalArgumentException("socket instream must be specified");
         }
-        if (address.isUnresolved()) {
-            throw new IllegalArgumentException("address is not resolved: " + address.toString());
+        if (socketOutstream == null) {
+            throw new IllegalArgumentException("socket outstream must be specified");
         }
-        final DeploymentContext context = new DeploymentContext(deploymentName, address);
+        if (reader == null) {
+            throw new IllegalArgumentException("reader must be specified");
+        }
+        if (writer == null) {
+            throw new IllegalArgumentException("writer must be specified");
+        }
+        final DeploymentContext context = new DeploymentContext(deploymentName, socketInstream, socketOutstream,
+            reader, writer);
         return context;
     }
 
     /**
-     * @return the address
+     * @return the socketInstream
      */
-    public InetSocketAddress getAddress() {
-        return address;
+    public InputStream getSocketInstream() {
+        return socketInstream;
+    }
+
+    /**
+     * @return the socketOutstream
+     */
+    public OutputStream getSocketOutstream() {
+        return socketOutstream;
+    }
+
+    /**
+     * @return the reader
+     */
+    public BufferedReader getReader() {
+        return reader;
+    }
+
+    /**
+     * @return the writer
+     */
+    public PrintWriter getWriter() {
+        return writer;
     }
 
 }

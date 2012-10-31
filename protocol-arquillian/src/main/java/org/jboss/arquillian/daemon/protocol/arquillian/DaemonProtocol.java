@@ -16,6 +16,8 @@
  */
 package org.jboss.arquillian.daemon.protocol.arquillian;
 
+import java.util.Collection;
+
 import org.jboss.arquillian.container.spi.client.protocol.ProtocolDescription;
 import org.jboss.arquillian.container.spi.client.protocol.metadata.ProtocolMetaData;
 import org.jboss.arquillian.container.test.spi.ContainerMethodExecutor;
@@ -48,7 +50,10 @@ public class DaemonProtocol implements Protocol<DaemonProtocolConfiguration> {
     @Override
     public ContainerMethodExecutor getExecutor(final DaemonProtocolConfiguration protocolConfiguration,
         final ProtocolMetaData metaData, final CommandCallback callback) {
-        return DaemonMethodExecutor.INSTANCE;
+        final Collection<DeploymentContext> contexts = metaData.getContexts(DeploymentContext.class);
+        assert contexts.size() == 1 : "Should be exactly one deployment context";
+        final DeploymentContext context = contexts.iterator().next();
+        return new DaemonMethodExecutor(context);
     }
 
 }

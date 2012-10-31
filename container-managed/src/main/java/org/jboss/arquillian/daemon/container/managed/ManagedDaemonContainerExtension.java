@@ -17,7 +17,9 @@
 package org.jboss.arquillian.daemon.container.managed;
 
 import org.jboss.arquillian.container.spi.client.container.DeployableContainer;
+import org.jboss.arquillian.container.test.spi.client.protocol.Protocol;
 import org.jboss.arquillian.core.spi.LoadableExtension;
+import org.jboss.arquillian.daemon.protocol.arquillian.DaemonProtocol;
 
 /**
  * @author <a href="mailto:alr@jboss.org">Andrew Lee Rubinger</a>
@@ -27,6 +29,7 @@ public class ManagedDaemonContainerExtension implements LoadableExtension {
     @Override
     public void register(final ExtensionBuilder builder) {
         builder.service(DeployableContainer.class, ManagedDaemonDeployableContainer.class);
+        builder.service(Protocol.class, DaemonProtocol.class);
     }
 
 }

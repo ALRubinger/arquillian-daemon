@@ -19,6 +19,8 @@ package org.jboss.arquillian.daemon.protocol.arquillian;
 import org.jboss.arquillian.container.test.spi.client.protocol.ProtocolConfiguration;
 
 /**
+ * {@link ProtocolConfiguration} implementation for the Arquillian Server Daemon
+ *
  * @author <a href="mailto:alr@jboss.org">Andrew Lee Rubinger</a>
  */
 public class DaemonProtocolConfiguration implements ProtocolConfiguration {
