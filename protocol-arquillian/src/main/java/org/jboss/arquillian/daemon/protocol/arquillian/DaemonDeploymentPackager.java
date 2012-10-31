@@ -17,18 +17,25 @@
 package org.jboss.arquillian.daemon.protocol.arquillian;
 
 import java.util.Collection;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 import org.jboss.arquillian.container.test.spi.TestDeployment;
 import org.jboss.arquillian.container.test.spi.client.deployment.DeploymentPackager;
 import org.jboss.arquillian.container.test.spi.client.deployment.ProtocolArchiveProcessor;
 import org.jboss.shrinkwrap.api.Archive;
+import org.jboss.shrinkwrap.api.spec.JavaArchive;
 
 /**
+ * {@link DeploymentPackager} to merge auxiliar archive contents with the archive provided by the user
+ *
  * @author <a href="mailto:alr@jboss.org">Andrew Lee Rubinger</a>
  */
 public enum DaemonDeploymentPackager implements DeploymentPackager {
 
     INSTANCE;
+
+    private static final Logger log = Logger.getLogger(DaemonDeploymentPackager.class.getName());
 
     /**
      * {@inheritDoc}
@@ -39,8 +46,19 @@ public enum DaemonDeploymentPackager implements DeploymentPackager {
     @Override
     public Archive<?> generateDeployment(final TestDeployment testDeployment,
         final Collection<ProtocolArchiveProcessor> processors) {
-        // We only deploy the archive as specified by the user
-        return testDeployment.getApplicationArchive();
-    }
 
+        // Merge auxiliary archives with the declared for ARQ and testrunner support
+        final JavaArchive archive = testDeployment.getApplicationArchive().as(JavaArchive.class);
+        if (log.isLoggable(Level.FINEST)) {
+            log.finest("Archive before additional packaging: " + archive.toString(true));
+        }
+        for (final Archive<?> auxArchive : testDeployment.getAuxiliaryArchives()) {
+            archive.merge(auxArchive);
+        }
+        if (log.isLoggable(Level.FINEST)) {
+            log.finest("Archive after additional packaging: " + archive.toString(true));
+        }
+        return archive;
+
+    }
 }
