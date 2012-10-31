@@ -25,11 +25,15 @@ import java.io.OutputStream;
 import java.io.OutputStreamWriter;
 import java.io.PrintWriter;
 import java.lang.ProcessBuilder.Redirect;
+import java.net.ConnectException;
+import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 import org.jboss.arquillian.container.spi.client.container.DeployableContainer;
 import org.jboss.arquillian.container.spi.client.container.DeploymentException;
@@ -37,6 +41,7 @@ import org.jboss.arquillian.container.spi.client.container.LifecycleException;
 import org.jboss.arquillian.container.spi.client.protocol.ProtocolDescription;
 import org.jboss.arquillian.container.spi.client.protocol.metadata.ProtocolMetaData;
 import org.jboss.arquillian.daemon.protocol.arquillian.DaemonProtocol;
+import org.jboss.arquillian.daemon.protocol.arquillian.DeploymentContext;
 import org.jboss.arquillian.daemon.protocol.wire.WireProtocol;
 import org.jboss.shrinkwrap.api.Archive;
 import org.jboss.shrinkwrap.api.exporter.ZipExporter;
@@ -47,11 +52,19 @@ import org.jboss.shrinkwrap.descriptor.api.Descriptor;
  */
 public class ManagedDaemonDeployableContainer implements DeployableContainer<ManagedDaemonContainerConfiguration> {
 
+    private static final Logger log = Logger.getLogger(ManagedDaemonDeployableContainer.class.getName());
     private static final String ERROR_MESSAGE_DESCRIPTORS_UNSUPPORTED = "Descriptor deployment not supported";
 
     private Thread shutdownThread;
-
     private final ExecutorService executorService = Executors.newCachedThreadPool();
+
+    private InetSocketAddress remoteAddress;
+    private Socket socket;
+    private OutputStream socketOutstream;
+    private InputStream socketInstream;
+    private BufferedReader reader;
+    private PrintWriter writer;
+    private String deploymentName;
 
     /**
      * {@inheritDoc}
@@ -71,14 +84,21 @@ public class ManagedDaemonDeployableContainer implements DeployableContainer<Man
 
     @Override
     public void start() throws LifecycleException {
-        final File file = new File("target/arquillian-daemon-main.jar"); // Props
-        final File javaHome = new File(System.getProperty("java.home"));
+
+        // TODO Get from properties
+        final String remoteHost = "localhost";
+        final String remotePort = "12345";
+        final InetSocketAddress address = new InetSocketAddress(remoteHost, Integer.parseInt(remotePort));
+        this.remoteAddress = address;
+
+        final File file = new File("target/arquillian-daemon-main.jar"); // TODO Props
+        final File javaHome = new File(System.getProperty("java.home")); // TODO Security Action
         final List<String> command = new ArrayList<String>(10);
         command.add(javaHome.getAbsolutePath() + "/bin/java");
         command.add("-jar");
         command.add(file.getAbsolutePath());
-        command.add("localhost"); // Props
-        command.add("12345"); // Props
+        command.add(address.getHostString());
+        command.add(Integer.toString(address.getPort()));
 
         final ProcessBuilder processBuilder = new ProcessBuilder(command);
         processBuilder.redirectErrorStream(true);
@@ -108,6 +128,55 @@ public class ManagedDaemonDeployableContainer implements DeployableContainer<Man
         shutdownThread = new Thread(shutdownServerRunnable);
         Runtime.getRuntime().addShutdownHook(shutdownThread);
 
+        // Open up remote resources
+        try {
+
+            final long startTime = System.currentTimeMillis();
+            final long acceptableTime = startTime * 1000 * 10; // 10 seconds from now
+            Socket socket = null;
+            while (true) {
+                try {
+                    // TODO Security Action
+                    socket = new Socket(remoteAddress.getHostString(), remoteAddress.getPort());
+                    if (log.isLoggable(Level.FINEST)) {
+                        log.finest("Got connection to " + remoteAddress.toString());
+                    }
+                    break;
+                } catch (final ConnectException ce) {
+                    if (log.isLoggable(Level.FINEST)) {
+                        log.finest("No connection yet available to remote process");
+                    }
+                    final long currentTime = System.currentTimeMillis();
+                    // Time expired?
+                    if (currentTime > acceptableTime) {
+                        throw ce;
+                    }
+                    // Sleep and try again
+                    try {
+                        Thread.sleep(200);
+                    } catch (final InterruptedException e) {
+                        Thread.interrupted();
+                        throw new RuntimeException("No one should be interrupting us waiting to connect", e);
+                    }
+                }
+            }
+            assert socket != null : "Socket should have been connected";
+            this.socket = socket;
+            final OutputStream socketOutstream = socket.getOutputStream();
+            this.socketOutstream = socketOutstream;
+            final PrintWriter writer = new PrintWriter(new OutputStreamWriter(socketOutstream, WireProtocol.CHARSET),
+                true);
+            this.writer = writer;
+            final InputStream socketInstream = socket.getInputStream();
+            this.socketInstream = socketInstream;
+            final BufferedReader reader = new BufferedReader(new InputStreamReader(socketInstream));
+            this.reader = reader;
+        } catch (final IOException ioe) {
+            this.closeRemoteResources();
+            throw new LifecycleException("Could not open connection to remote process", ioe);
+        }
+
+        // TODO Instead do a loop where we check isRunning
         try {
             Thread.sleep(1000);
         } catch (final InterruptedException e) {
@@ -117,12 +186,8 @@ public class ManagedDaemonDeployableContainer implements DeployableContainer<Man
 
     @Override
     public void stop() throws LifecycleException {
-
+        this.closeRemoteResources();
         executorService.shutdownNow();
-
-        // TODO
-        throw new UnsupportedOperationException("TBD");
-
     }
 
     /**
@@ -138,17 +203,11 @@ public class ManagedDaemonDeployableContainer implements DeployableContainer<Man
     @Override
     public ProtocolMetaData deploy(final Archive<?> archive) throws DeploymentException {
 
-        Socket socket = null;
-        BufferedReader reader = null;
+        final String deploymentName;
         try {
-            // TODO Socket address from props
-            socket = new Socket("localhost", 12345);
-            final OutputStream socketOutstream = socket.getOutputStream();
-            final PrintWriter writer = new PrintWriter(new OutputStreamWriter(socketOutstream, WireProtocol.CHARSET),
-                true);
 
             // Write the deploy command prefix and flush it
-            writer.print(WireProtocol.COMMAND_DEPLOY);
+            writer.print(WireProtocol.COMMAND_DEPLOY_PREFIX);
             writer.flush();
             // Now write the archive
             archive.as(ZipExporter.class).exportTo(socketOutstream);
@@ -156,39 +215,73 @@ public class ManagedDaemonDeployableContainer implements DeployableContainer<Man
             // Terminate the command
             writer.write(WireProtocol.COMMAND_EOF_DELIMITER);
             writer.flush();
-            // Read and check the response
-            final InputStream responseStream = socket.getInputStream();
-            reader = new BufferedReader(new InputStreamReader(responseStream));
+
+            // Block until we get "OK" response
+            final String response = reader.readLine();
+            if (!response.startsWith(WireProtocol.RESPONSE_OK_PREFIX)) {
+                throw new DeploymentException("Did not receive proper response from the server, instead was: "
+                    + response);
+            }
+            if (log.isLoggable(Level.FINEST)) {
+                log.finest("Response from deployment: " + response);
+            }
+
+            // Set deployment name
+            final int startIndex = new String(WireProtocol.RESPONSE_OK_PREFIX + WireProtocol.COMMAND_DEPLOY_PREFIX)
+                .length();
+            deploymentName = response.substring(startIndex);
+            if (log.isLoggable(Level.FINER)) {
+                log.finer("Got deployment: " + deploymentName);
+            }
+            this.deploymentName = deploymentName;
+
+        } catch (final IOException ioe) {
+            this.closeRemoteResources();
+            throw new DeploymentException("I/O problem encountered during deployment", ioe);
+        } catch (final RuntimeException re) {
+            this.closeRemoteResources();
+            throw new DeploymentException("Unexpected problem encountered during deployment", re);
+        }
+
+        // Create and return ProtocolMetaData
+        final ProtocolMetaData pmd = new ProtocolMetaData();
+        final DeploymentContext socketContext = DeploymentContext.create(deploymentName, remoteAddress);
+        pmd.addContext(socketContext);
+        return pmd;
+    }
+
+    @Override
+    public void undeploy(final Archive<?> archive) throws DeploymentException {
+
+        assert deploymentName != null : "Deployment name should be set";
+
+        try {
+            // Write the undeploy command prefix and flush it
+            writer.print(WireProtocol.COMMAND_UNDEPLOY_PREFIX);
+            // Write the deployment name
+            writer.print(deploymentName);
+            // Terminate the command and flush
+            writer.write(WireProtocol.COMMAND_EOF_DELIMITER);
+            writer.flush();
+
+            // Block until we get "OK" response
             final String response = reader.readLine();
             if (!response.startsWith(WireProtocol.RESPONSE_OK_PREFIX)) {
                 throw new DeploymentException("Did not receive proper response from the server, instead was: "
                     + response);
             }
 
-        } catch (final IOException ioe) {
-            throw new DeploymentException("I/O problem encountered during deployment", ioe);
-        } finally {
-            if (socket != null) {
-                try {
-                    socket.close();
-                } catch (final IOException ignore) {
-                }
+            if (log.isLoggable(Level.FINEST)) {
+                log.finest("Response from undeployment: " + response);
             }
-            if (reader != null) {
-                try {
-                    reader.close();
-                } catch (final IOException ignore) {
-                }
-            }
-        }
-        // TODO
-        throw new UnsupportedOperationException("TBD");
-    }
 
-    @Override
-    public void undeploy(final Archive<?> archive) throws DeploymentException {
-        // TODO
-        throw new UnsupportedOperationException("TBD");
+        } catch (final IOException ioe) {
+            this.closeRemoteResources();
+            throw new DeploymentException("I/O problem encountered during undeployment", ioe);
+        } catch (final RuntimeException re) {
+            this.closeRemoteResources();
+            throw new DeploymentException("Unexpected problem encountered during undeployment", re);
+        }
     }
 
     /**
@@ -207,6 +300,40 @@ public class ManagedDaemonDeployableContainer implements DeployableContainer<Man
     @Override
     public void undeploy(final Descriptor descriptor) throws DeploymentException {
         throw new UnsupportedOperationException(ERROR_MESSAGE_DESCRIPTORS_UNSUPPORTED);
+
+    }
+
+    /**
+     * Safely close remote resources
+     */
+    private void closeRemoteResources() {
+        if (reader != null) {
+            try {
+                reader.close();
+            } catch (final IOException ignore) {
+            }
+        }
+        if (writer != null) {
+            writer.close();
+        }
+        if (socketOutstream != null) {
+            try {
+                socketOutstream.close();
+            } catch (final IOException ignore) {
+            }
+        }
+        if (socketInstream != null) {
+            try {
+                socketInstream.close();
+            } catch (final IOException ignore) {
+            }
+        }
+        if (socket != null) {
+            try {
+                socket.close();
+            } catch (final IOException ignore) {
+            }
+        }
 
     }
 }

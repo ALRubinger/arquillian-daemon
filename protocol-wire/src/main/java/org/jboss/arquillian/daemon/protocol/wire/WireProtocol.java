@@ -17,22 +17,45 @@
 package org.jboss.arquillian.daemon.protocol.wire;
 
 /**
- * Defines the wire protocol for the Arquillian Server Daemon
+ * Defines the wire protocol for the Arquillian Server Daemon.
+ *
+ * To stop:
+ * <code>CMD stop<<EOF</code>
+ * To deploy:
+ * <code>DPL ${zip-formatted contents}<<EOF</code>
+ * To undeploy:
+ * <code>CMD undeploy ${deploymentName}<<EOF</code>
  *
  * @author <a href="mailto:alr@jboss.org">Andrew Lee Rubinger</a>
  */
 public interface WireProtocol {
 
+    /**
+     * Charset used in codec of String/bytes
+     */
     String CHARSET = "UTF-8";
 
     String PREFIX_STRING_COMMAND = "CMD ";
     String PREFIX_DEPLOY_COMMAND = "DPL ";
 
     String COMMAND_STOP = PREFIX_STRING_COMMAND + "stop";
-    String COMMAND_DEPLOY = PREFIX_DEPLOY_COMMAND;
-    String COMMAND_EOF_DELIMITER = "EOF";
-    String COMMAND_UNDEPLOY = PREFIX_STRING_COMMAND + "undeploy";
+
+    /**
+     * To be prepended with the byte contents of a ZIP-formatted stream
+     */
+    String COMMAND_DEPLOY_PREFIX = PREFIX_DEPLOY_COMMAND;
+
+    /**
+     * Marks the end of a command
+     */
+    String COMMAND_EOF_DELIMITER = "<<EOF";
+
+    /**
+     * To be prepended to a valid current deployment name
+     */
+    String COMMAND_UNDEPLOY_PREFIX = PREFIX_STRING_COMMAND + "undeploy ";
 
     String RESPONSE_OK_PREFIX = "OK ";
+    String RESPONSE_ERROR_PREFIX = "ERR ";
 
 }

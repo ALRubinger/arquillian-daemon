@@ -39,12 +39,12 @@ import io.netty.handler.codec.string.StringDecoder;
 import java.io.InputStream;
 import java.io.UnsupportedEncodingException;
 import java.net.InetSocketAddress;
-import java.net.URL;
-import java.net.URLClassLoader;
 import java.nio.charset.Charset;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.concurrent.Callable;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.logging.Handler;
@@ -68,8 +68,6 @@ import org.jboss.shrinkwrap.api.importer.ZipImporter;
 class NettyServer implements Server {
 
     private static final Logger log = Logger.getLogger(NettyServer.class.getName());
-
-    private ExecutorService shutdownService;
     private static final EofDecoder EOF_DECODER;
     static {
         try {
@@ -79,15 +77,31 @@ class NettyServer implements Server {
         }
     }
 
+    private ExecutorService shutdownService;
     private ServerBootstrap bootstrap;
     private boolean running;
     private InetSocketAddress boundAddress;
     private final InetSocketAddress toBindAddress;
+    private final ConcurrentMap<String, GenericArchive> deployedArchives;
+    private final Domain shrinkwrapDomain;
 
     NettyServer(final InetSocketAddress bindAddress) {
         // Precondition checks
         assert bindAddress != null : "Bind address must be specified";
+
+        // Determine the ClassLoader to use in creating the SW Domain
+        final ClassLoader thisCl = NettyServer.class.getClassLoader();
+        final Set<ClassLoader> classloaders = new HashSet<ClassLoader>(1);
+        classloaders.add(thisCl);
+        if (log.isLoggable(Level.FINEST)) {
+            log.finest("Using ClassLoader for ShrinkWrap Domain: " + thisCl);
+        }
+        final Domain shrinkwrapDomain = ShrinkWrap.createDomain(new ConfigurationBuilder().classLoaders(classloaders));
+
+        // Set
         this.toBindAddress = bindAddress;
+        this.deployedArchives = new ConcurrentHashMap<String, GenericArchive>();
+        this.shrinkwrapDomain = shrinkwrapDomain;
     }
 
     /**
@@ -233,6 +247,7 @@ class NettyServer implements Server {
 
             // Read and handle commands
             try {
+                // Stop
                 if (WireProtocol.COMMAND_STOP.equals(message)) {
 
                     // Tell the client OK
@@ -249,6 +264,34 @@ class NettyServer implements Server {
                         }
                     });
 
+                }
+                // Undeployment
+                if (message.startsWith(WireProtocol.COMMAND_UNDEPLOY_PREFIX)) {
+
+                    // Get out the deployment
+                    final String deploymentName = message.substring(WireProtocol.COMMAND_UNDEPLOY_PREFIX.length())
+                        .trim();
+                    if (log.isLoggable(Level.FINEST)) {
+                        log.finest("Requesting undeployment of: " + deploymentName);
+                    }
+                    final GenericArchive removedArchive = NettyServer.this.deployedArchives.remove(deploymentName);
+
+                    // Check that we resulted in undeployment
+                    final ByteBuf out = ctx.nextOutboundByteBuffer();
+                    if (removedArchive == null) {
+                        if (log.isLoggable(Level.FINEST)) {
+                            log.finest("Not current deployment: " + deploymentName);
+                        }
+                        NettyServer.sendResponse(ctx, out, WireProtocol.RESPONSE_ERROR_PREFIX + "Deployment "
+                            + deploymentName + " could not be found in current deployments.");
+                        return;
+                    }
+
+                    // Tell the client OK
+                    if (log.isLoggable(Level.FINEST)) {
+                        log.finest("Undeployed: " + deploymentName);
+                    }
+                    NettyServer.sendResponse(ctx, out, WireProtocol.RESPONSE_OK_PREFIX + deploymentName);
                 }
                 // Unsupported command
                 else {
@@ -284,48 +327,36 @@ class NettyServer implements Server {
 
     }
 
-    private static void sendResponse(final ChannelHandlerContext ctx, final ByteBuf out, final String response) {
-        out.discardReadBytes();
-        try {
-            out.writeBytes(response.getBytes(WireProtocol.CHARSET));
-            out.writeBytes(Delimiters.lineDelimiter()[0]);
-        } catch (final UnsupportedEncodingException uee) {
-            throw new RuntimeException("Unsupported encoding", uee);
-        }
-        ctx.flush();
-    }
-
     private final class DeployHandlerAdapter extends ChannelInboundByteHandlerAdapter {
 
         @Override
         public void inboundBufferUpdated(final ChannelHandlerContext ctx, final ByteBuf in) throws Exception {
+
+            if (log.isLoggable(Level.FINEST)) {
+                log.finest("Using the " + this.getClass().getSimpleName());
+            }
+
             try {
-                if (log.isLoggable(Level.FINEST)) {
-                    log.finest("Using the " + this.getClass().getSimpleName());
-                }
+
+                // Read in the archive using the isolated CL context of this domain
                 final InputStream instream = new ByteBufInputStream(in);
-                final ClassLoader thisCl = NettyServer.class.getClassLoader();
-                final Set<ClassLoader> classloaders = new HashSet<ClassLoader>(1);
-                final ClassLoader newCl = new URLClassLoader(new URL[] {}, thisCl);
-                classloaders.add(newCl);
-                if (log.isLoggable(Level.FINEST)) {
-                    log.finest("Using ClassLoader: " + newCl);
-                }
-                final Domain domain = ShrinkWrap.createDomain(new ConfigurationBuilder().classLoaders(classloaders));
-                final GenericArchive archive = domain.getArchiveFactory().create(ZipImporter.class)
+                final GenericArchive archive = shrinkwrapDomain.getArchiveFactory().create(ZipImporter.class)
                     .importFrom(instream).as(GenericArchive.class);
                 instream.close();
-                // Tell the client OK
-                final ByteBuf out = ctx.nextOutboundByteBuffer();
                 if (log.isLoggable(Level.FINEST)) {
                     log.finest("Got archive: " + archive.toString(true));
                 }
                 // TODO Remove
-                log.info("Got archive: " + archive.toString(true));
-                NettyServer.sendResponse(ctx, out, WireProtocol.RESPONSE_OK_PREFIX + WireProtocol.COMMAND_DEPLOY);
-            } catch (final Throwable e) {
-                e.printStackTrace();
-                throw new RuntimeException(e);
+                log.info(archive.toString(true));
+
+                // Store the archive
+                final String id = archive.getId();
+                NettyServer.this.deployedArchives.put(id, archive);
+
+                // Tell the client OK, and let it know the ID of the archive (so it may be undeployed)
+                final ByteBuf out = ctx.nextOutboundByteBuffer();
+                NettyServer.sendResponse(ctx, out, WireProtocol.RESPONSE_OK_PREFIX + WireProtocol.COMMAND_DEPLOY_PREFIX
+                    + id);
             } finally {
                 NettyServer.this.resetPipeline(ctx.pipeline(), this);
             }
@@ -387,7 +418,7 @@ class NettyServer implements Server {
             else if (this.isDeployCommand(magic1, magic2, magic3)) {
                 // Set the reader index so we strip out the command portion, leaving only the bytes containing the
                 // archive (the frame decoder will strip off the EOF delimiter)
-                in.readerIndex(in.readerIndex() + WireProtocol.COMMAND_DEPLOY.length());
+                in.readerIndex(in.readerIndex() + WireProtocol.COMMAND_DEPLOY_PREFIX.length());
 
                 // Adjust the pipeline such that we use the deploy handler only
                 pipeline.addLast(new DeployHandlerAdapter());
@@ -406,14 +437,6 @@ class NettyServer implements Server {
             final ByteBuf nextInboundByteBuffer = ctx.nextInboundByteBuffer();
             nextInboundByteBuffer.writeBytes(in);
             pipeline.fireInboundBufferUpdated();
-
-            // Archive deployment?
-            // TODO
-            // pipeline.addLast(
-            // new ObjectDecoder(ClassResolvers.cacheDisabled(NettyServer.class.getClassLoader())),
-            // new StringCommandHandler());
-            // new StringDecoder()
-
         }
 
         /**
@@ -424,7 +447,7 @@ class NettyServer implements Server {
          */
         @Override
         public void exceptionCaught(final ChannelHandlerContext ctx, final Throwable cause) throws Exception {
-            NettyServer.this.sendResponse(ctx, ctx.nextOutboundByteBuffer(), cause.getMessage());
+            NettyServer.sendResponse(ctx, ctx.nextOutboundByteBuffer(), cause.getMessage());
         }
 
         /**
@@ -458,14 +481,6 @@ class NettyServer implements Server {
 
     }
 
-    private void resetPipeline(final ChannelPipeline pipeline, final ChannelInboundHandlerAdapter... toRemove) {
-        pipeline.addLast(EOF_DECODER);
-        pipeline.addLast(new ActionControllerHandler());
-        for (final ChannelInboundHandlerAdapter adapter : toRemove) {
-            pipeline.remove(adapter);
-        }
-    }
-
     /**
      * {@link DelimiterBasedFrameDecoder} implementation to use the {@link WireProtocol#COMMAND_EOF_DELIMITER},
      * stripping it from the buffer. Is {@link Sharable} to allow this to be added/removed more than once.
@@ -478,6 +493,25 @@ class NettyServer implements Server {
             super(Integer.MAX_VALUE, true, Unpooled.wrappedBuffer(WireProtocol.COMMAND_EOF_DELIMITER
                 .getBytes(WireProtocol.CHARSET)));
         }
+    }
+
+    private void resetPipeline(final ChannelPipeline pipeline, final ChannelInboundHandlerAdapter... toRemove) {
+        pipeline.addLast(EOF_DECODER);
+        pipeline.addLast(new ActionControllerHandler());
+        for (final ChannelInboundHandlerAdapter adapter : toRemove) {
+            pipeline.remove(adapter);
+        }
+    }
+
+    private static void sendResponse(final ChannelHandlerContext ctx, final ByteBuf out, final String response) {
+        out.discardReadBytes();
+        try {
+            out.writeBytes(response.getBytes(WireProtocol.CHARSET));
+            out.writeBytes(Delimiters.lineDelimiter()[0]);
+        } catch (final UnsupportedEncodingException uee) {
+            throw new RuntimeException("Unsupported encoding", uee);
+        }
+        ctx.flush();
     }
 
 }

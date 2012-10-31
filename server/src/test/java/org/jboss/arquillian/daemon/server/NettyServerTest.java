@@ -127,7 +127,7 @@ public class NettyServerTest {
                 true);
 
             // Write the deploy command prefix and flush it
-            writer.print(WireProtocol.COMMAND_DEPLOY);
+            writer.print(WireProtocol.COMMAND_DEPLOY_PREFIX);
             writer.flush();
             // Now write the archive
             archive.as(ZipExporter.class).exportTo(socketOutstream);
