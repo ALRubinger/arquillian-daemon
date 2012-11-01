@@ -19,12 +19,9 @@ package org.jboss.arquillian.daemon.protocol.wire;
 /**
  * Defines the wire protocol for the Arquillian Server Daemon.
  *
- * To stop:
- * <code>CMD stop<<EOF</code>
- * To deploy:
- * <code>DPL ${zip-formatted contents}<<EOF</code>
- * To undeploy:
- * <code>CMD undeploy ${deploymentName}<<EOF</code>
+ * To stop: <code>CMD stop<<EOF</code> To deploy: <code>DPL ${zip-formatted contents}<<EOF</code> To undeploy:
+ * <code>CMD undeploy ${deploymentName}<<EOF</code> To execute tests:
+ * <code>CMD test ${deploymentName} ${FQN test class} ${methodName}<<EOF</code>
  *
  * @author <a href="mailto:alr@jboss.org">Andrew Lee Rubinger</a>
  */
@@ -36,19 +33,24 @@ public interface WireProtocol {
     String CHARSET = "UTF-8";
 
     String PREFIX_STRING_COMMAND = "CMD ";
-    String PREFIX_DEPLOY_COMMAND = "DPL ";
 
     String COMMAND_STOP = PREFIX_STRING_COMMAND + "stop";
 
     /**
-     * To be prepended with the byte contents of a ZIP-formatted stream
+     * To be prepended to the byte contents of a ZIP-formatted stream, then {@link WireProtocol#COMMAND_EOF_DELIMITER}
      */
-    String COMMAND_DEPLOY_PREFIX = PREFIX_DEPLOY_COMMAND;
+    String COMMAND_DEPLOY_PREFIX = "DPL ";
+
+    /**
+     * To be prepended to the FQN of the test class, then the method name, then
+     * {@link WireProtocol#COMMAND_EOF_DELIMITER}
+     */
+    String COMMAND_TEST_PREFIX = PREFIX_STRING_COMMAND + "test ";
 
     /**
      * Marks the end of a command
      */
-    String COMMAND_EOF_DELIMITER = "<<EOF";
+    String COMMAND_EOF_DELIMITER = "<<EOF>>";
 
     /**
      * To be prepended to a valid current deployment name

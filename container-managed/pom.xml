@@ -14,12 +14,6 @@
   <name>Managed Container</name>
   
   <dependencies>
-      <!-- TAKE THIS OUT -->
-      <dependency>
-        <groupId>io.netty</groupId>
-        <artifactId>netty</artifactId>
-        <version>4.0.0.Alpha5</version>
-      </dependency>
       <dependency>
         <groupId>org.jboss.arquillian.daemon</groupId>
         <artifactId>arquillian-daemon-main</artifactId>
@@ -43,7 +37,7 @@
       <dependency>
         <groupId>org.jboss.arquillian.junit</groupId>
         <artifactId>arquillian-junit-container</artifactId>
-        <scope>test</scope>
+        <!-- <scope>test</scope>   -->
       </dependency>
       <dependency>
         <groupId>junit</groupId>

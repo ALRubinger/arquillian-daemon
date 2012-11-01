@@ -16,9 +16,12 @@
  */
 package org.jboss.arquillian.daemon.protocol.arquillian;
 
+import java.io.BufferedReader;
+import java.io.PrintWriter;
 import java.util.logging.Logger;
 
 import org.jboss.arquillian.container.test.spi.ContainerMethodExecutor;
+import org.jboss.arquillian.daemon.protocol.wire.WireProtocol;
 import org.jboss.arquillian.test.spi.TestMethodExecutor;
 import org.jboss.arquillian.test.spi.TestResult;
 
@@ -28,6 +31,7 @@ import org.jboss.arquillian.test.spi.TestResult;
 public class DaemonMethodExecutor implements ContainerMethodExecutor {
 
     private static final Logger log = Logger.getLogger(DaemonMethodExecutor.class.getName());
+    private static final String SPACE = " ";
 
     private final DeploymentContext context;
 
@@ -54,6 +58,25 @@ public class DaemonMethodExecutor implements ContainerMethodExecutor {
         final long startTime = System.currentTimeMillis();
         final long endTime;
         try {
+
+            final StringBuilder builder = new StringBuilder();
+            builder.append(WireProtocol.COMMAND_TEST_PREFIX);
+            builder.append(context.getName());
+            builder.append(SPACE);
+            builder.append(testMethodExecutor.getInstance().getClass().getName());
+            builder.append(SPACE);
+            builder.append(testMethodExecutor.getMethod().getName());
+            builder.append(WireProtocol.COMMAND_EOF_DELIMITER);
+            final String testCommand = builder.toString();
+
+            final PrintWriter writer = this.context.getWriter();
+            writer.write(testCommand);
+            writer.flush();
+
+            final BufferedReader reader = this.context.getReader();
+            final String response = reader.readLine();
+            log.info("Reply from test request: " + response);
+
             // TODO This is going local, need to bridge to the server
             testMethodExecutor.invoke();
         } catch (final Throwable t) {

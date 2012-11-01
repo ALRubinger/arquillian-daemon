@@ -37,11 +37,13 @@ import io.netty.handler.codec.string.StringDecoder;
 
 import java.io.InputStream;
 import java.io.UnsupportedEncodingException;
+import java.lang.reflect.Method;
 import java.net.InetSocketAddress;
 import java.nio.charset.Charset;
 import java.util.HashSet;
 import java.util.NoSuchElementException;
 import java.util.Set;
+import java.util.StringTokenizer;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
@@ -57,6 +59,7 @@ import org.jboss.shrinkwrap.api.ConfigurationBuilder;
 import org.jboss.shrinkwrap.api.Domain;
 import org.jboss.shrinkwrap.api.GenericArchive;
 import org.jboss.shrinkwrap.api.ShrinkWrap;
+import org.jboss.shrinkwrap.api.classloader.ShrinkWrapClassLoader;
 import org.jboss.shrinkwrap.api.importer.ZipImporter;
 
 /**
@@ -85,6 +88,9 @@ class NettyServer implements Server {
     private static final String[] NAME_CHANNEL_HANDLERS = { NAME_CHANNEL_HANDLER_EOF,
         NAME_CHANNEL_HANDLER_ACTION_CONTROLLER, NAME_CHANNEL_HANDLER_STRING_DECODER,
         NAME_CHANNEL_HANDLER_FRAME_DECODER, NAME_CHANNEL_HANDLER_DEPLOY_HANDLER, NAME_CHANNEL_HANDLER_COMMAND };
+    private static final String CLASS_NAME_ARQ_TEST_RUNNERS = "org.jboss.arquillian.container.test.spi.util.TestRunners";
+    private static final String METHOD_NAME_GET_TEST_RUNNER = "getTestRunner";
+    private static final String METHOD_NAME_EXECUTE = "execute";
 
     private ExecutorService shutdownService;
     private ServerBootstrap bootstrap;
@@ -254,63 +260,121 @@ class NettyServer implements Server {
                 log.finest("Got command: " + message);
             }
 
-            // Reset the pipeline for the next call
-            final ChannelPipeline pipeline = ctx.pipeline();
-            NettyServer.this.resetPipeline(pipeline);
-
             // Get the buffer for the response
             final ByteBuf out = ctx.nextOutboundByteBuffer();
 
-            // Stop
-            if (WireProtocol.COMMAND_STOP.equals(message)) {
+            // We want to catch any and all errors to to write out a proper response to the client
+            try {
 
-                // Set the response to tell the client OK
-                NettyServer.sendResponse(ctx, out, WireProtocol.RESPONSE_OK_PREFIX + message);
+                // Reset the pipeline for the next call
+                final ChannelPipeline pipeline = ctx.pipeline();
+                NettyServer.this.resetPipeline(pipeline);
 
-                // Now stop in another thread (after we send the response, else we'll prematurely close the
-                // connection)
-                shutdownService.submit(new Callable<Void>() {
-                    @Override
-                    public Void call() throws Exception {
-                        NettyServer.this.stop();
-                        return null;
-                    }
-                });
+                // Stop
+                if (WireProtocol.COMMAND_STOP.equals(message)) {
 
-                return;
+                    // Set the response to tell the client OK
+                    NettyServer.sendResponse(ctx, out, WireProtocol.RESPONSE_OK_PREFIX + message);
 
-            }
-            // Undeployment
-            if (message.startsWith(WireProtocol.COMMAND_UNDEPLOY_PREFIX)) {
-
-                // Get out the deployment
-                final String deploymentName = message.substring(WireProtocol.COMMAND_UNDEPLOY_PREFIX.length()).trim();
-                if (log.isLoggable(Level.FINEST)) {
-                    log.finest("Requesting undeployment of: " + deploymentName);
+                    // Now stop in another thread (after we send the response, else we'll prematurely close the
+                    // connection)
+                    shutdownService.submit(new Callable<Void>() {
+                        @Override
+                        public Void call() throws Exception {
+                            NettyServer.this.stop();
+                            return null;
+                        }
+                    });
                 }
-                final GenericArchive removedArchive = NettyServer.this.deployedArchives.remove(deploymentName);
+                // Undeployment
+                else if (message.startsWith(WireProtocol.COMMAND_UNDEPLOY_PREFIX)) {
 
-                // Check that we resulted in undeployment
-                if (removedArchive == null) {
+                    // Get out the deployment
+                    final String deploymentName = message.substring(WireProtocol.COMMAND_UNDEPLOY_PREFIX.length())
+                        .trim();
                     if (log.isLoggable(Level.FINEST)) {
-                        log.finest("Not current deployment: " + deploymentName);
+                        log.finest("Requesting undeployment of: " + deploymentName);
                     }
-                    final String response = WireProtocol.RESPONSE_ERROR_PREFIX + "Deployment " + deploymentName
-                        + " could not be found in current deployments.";
+                    final GenericArchive removedArchive = NettyServer.this.deployedArchives.remove(deploymentName);
+
+                    // Check that we resulted in undeployment
+                    if (removedArchive == null) {
+                        if (log.isLoggable(Level.FINEST)) {
+                            log.finest("Not current deployment: " + deploymentName);
+                        }
+                        final String response = WireProtocol.RESPONSE_ERROR_PREFIX + "Deployment " + deploymentName
+                            + " could not be found in current deployments.";
+                        NettyServer.sendResponse(ctx, out, response);
+                        return;
+                    }
+
+                    // Tell the client OK
+                    if (log.isLoggable(Level.FINEST)) {
+                        log.finest("Undeployed: " + deploymentName);
+                    }
+                    final String response = WireProtocol.RESPONSE_OK_PREFIX + deploymentName;
                     NettyServer.sendResponse(ctx, out, response);
-                    return;
+                }
+                // Test
+                else if (message.startsWith(WireProtocol.COMMAND_TEST_PREFIX)) {
+
+                    // Parse out the arguments
+                    final StringTokenizer tokenizer = new StringTokenizer(message);
+                    tokenizer.nextToken();
+                    tokenizer.nextToken();
+                    final String archiveId = tokenizer.nextToken();
+                    final String testClassName = tokenizer.nextToken();
+                    final String methodName = tokenizer.nextToken();
+
+                    final GenericArchive archive = NettyServer.this.deployedArchives.get(archiveId);
+                    if (archive == null) {
+                        throw new IllegalStateException("Archive with ID " + archiveId + " is not deployed");
+                    }
+
+                    // Use a ClassLoader with explicitly null parent to achieve isolation from --classpath
+                    final ShrinkWrapClassLoader isolatedArchiveCL = new ShrinkWrapClassLoader((ClassLoader) null,
+                        archive);
+
+                    try {
+                        final Class<?> testClass;
+                        try {
+                            testClass = isolatedArchiveCL.loadClass(testClassName);
+                        } catch (final ClassNotFoundException cnfe) {
+                            throw new IllegalStateException("Could not load class " + testClassName
+                                + " from deployed archive: " + archive.toString());
+                        }
+                        final Class<?> testRunnersClass;
+                        try {
+                            testRunnersClass = isolatedArchiveCL.loadClass(CLASS_NAME_ARQ_TEST_RUNNERS);
+                        } catch (final ClassNotFoundException cnfe) {
+                            throw new IllegalStateException("Could not load class " + CLASS_NAME_ARQ_TEST_RUNNERS
+                                + " from deployed archive: " + archive.toString());
+                        }
+                        final Method getTestRunnerMethod = testRunnersClass.getMethod(METHOD_NAME_GET_TEST_RUNNER,
+                            ClassLoader.class);
+                        final Object testRunner = getTestRunnerMethod.invoke(null, isolatedArchiveCL);
+                        final Class<?> testRunnerClass = testRunner.getClass();
+                        final Method executeMethod = testRunnerClass.getMethod(METHOD_NAME_EXECUTE, Class.class,
+                            String.class);
+                        final Object testResult = executeMethod.invoke(testRunner, testClass, methodName);
+                        log.info(testResult.toString());
+                    } finally {
+                        isolatedArchiveCL.close();
+                    }
+
+                    NettyServer.sendResponse(ctx, out, WireProtocol.RESPONSE_OK_PREFIX);
+
+                }
+                // Unsupported command
+                else {
+                    throw new UnsupportedOperationException("This server does not support command: " + message);
                 }
 
-                // Tell the client OK
-                if (log.isLoggable(Level.FINEST)) {
-                    log.finest("Undeployed: " + deploymentName);
-                }
-                final String response = WireProtocol.RESPONSE_OK_PREFIX + deploymentName;
-                NettyServer.sendResponse(ctx, out, response);
-            }
-            // Unsupported command
-            else {
-                throw new UnsupportedOperationException("This server does not support command: " + message);
+            } catch (final Throwable t) {
+                // Will be captured by any remote process which launched us and is piping in our output
+                t.printStackTrace();
+                NettyServer.sendResponse(ctx, out, WireProtocol.RESPONSE_ERROR_PREFIX
+                    + "Caught unexpected error servicing request: " + t.getMessage());
             }
 
         }
@@ -338,6 +402,11 @@ class NettyServer implements Server {
 
     }
 
+    /**
+     * Handles deployment only
+     *
+     * @author <a href="mailto:alr@jboss.org">Andrew Lee Rubinger</a>
+     */
     private final class DeployHandlerAdapter extends ChannelInboundByteHandlerAdapter {
 
         @Override
@@ -356,8 +425,6 @@ class NettyServer implements Server {
                 if (log.isLoggable(Level.FINEST)) {
                     log.finest("Got archive: " + archive.toString(true));
                 }
-                // TODO Remove
-                log.info(archive.toString(true));
 
                 // Store the archive
                 final String id = archive.getId();
@@ -371,23 +438,6 @@ class NettyServer implements Server {
                 NettyServer.this.resetPipeline(ctx.pipeline());
             }
         }
-
-        /**
-         *
-         * @see io.netty.channel.ChannelStateHandlerAdapter#exceptionCaught(io.netty.channel.ChannelHandlerContext,
-         *      java.lang.Throwable)
-         */
-        @Override
-        public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
-
-            // Log at warning
-            if (log.isLoggable(Level.WARNING)) {
-                log.warning("Got exception while server is not running: " + cause.getMessage());
-            }
-            super.exceptionCaught(ctx, cause);
-
-        }
-
     }
 
     /**
@@ -420,12 +470,12 @@ class NettyServer implements Server {
                 in.writeBytes(Delimiters.lineDelimiter()[0]);
                 // Adjust the pipeline such that we use the command handler
                 pipeline.addLast(NAME_CHANNEL_HANDLER_FRAME_DECODER,
-                    new DelimiterBasedFrameDecoder(80, Delimiters.lineDelimiter()));
+                    new DelimiterBasedFrameDecoder(2000, Delimiters.lineDelimiter()));
                 pipeline.addLast(NAME_CHANNEL_HANDLER_STRING_DECODER,
                     new StringDecoder(Charset.forName(WireProtocol.CHARSET)));
                 pipeline.addLast(NAME_CHANNEL_HANDLER_COMMAND, new StringCommandHandler());
-                pipeline.remove(this);
-                pipeline.remove(EOF_DECODER);
+                pipeline.remove(NAME_CHANNEL_HANDLER_ACTION_CONTROLLER);
+                pipeline.remove(NAME_CHANNEL_HANDLER_EOF);
             }
             // Deploy command?
             else if (this.isDeployCommand(magic1, magic2, magic3)) {
@@ -435,11 +485,12 @@ class NettyServer implements Server {
 
                 // Adjust the pipeline such that we use the deploy handler only
                 pipeline.addLast(NAME_CHANNEL_HANDLER_DEPLOY_HANDLER, new DeployHandlerAdapter());
-                pipeline.remove(this);
-                pipeline.remove(EOF_DECODER);
+                pipeline.remove(NAME_CHANNEL_HANDLER_ACTION_CONTROLLER);
+                pipeline.remove(NAME_CHANNEL_HANDLER_EOF);
             } else {
                 // Unknown command/protocol
-                log.info("UNKNOWN COMMAND");
+                NettyServer.sendResponse(ctx, ctx.nextOutboundByteBuffer(), WireProtocol.RESPONSE_ERROR_PREFIX
+                    + "Unsupported Command");
                 in.clear();
                 ctx.close();
                 return;
@@ -487,9 +538,9 @@ class NettyServer implements Server {
          * @return
          */
         private boolean isDeployCommand(final int magic1, final int magic2, final int magic3) {
-            return magic1 == WireProtocol.PREFIX_DEPLOY_COMMAND.charAt(0)
-                && magic2 == WireProtocol.PREFIX_DEPLOY_COMMAND.charAt(1)
-                && magic3 == WireProtocol.PREFIX_DEPLOY_COMMAND.charAt(2);
+            return magic1 == WireProtocol.COMMAND_DEPLOY_PREFIX.charAt(0)
+                && magic2 == WireProtocol.COMMAND_DEPLOY_PREFIX.charAt(1)
+                && magic3 == WireProtocol.COMMAND_DEPLOY_PREFIX.charAt(2);
         }
 
     }
@@ -517,8 +568,8 @@ class NettyServer implements Server {
             }
         }
         // Manually set up pipeline for action controller
-        pipeline.addLast(EOF_DECODER);
-        pipeline.addLast(new ActionControllerHandler());
+        pipeline.addLast(NAME_CHANNEL_HANDLER_EOF, EOF_DECODER);
+        pipeline.addLast(NAME_CHANNEL_HANDLER_ACTION_CONTROLLER, new ActionControllerHandler());
     }
 
     private static void sendResponse(final ChannelHandlerContext ctx, final ByteBuf out, final String response) {

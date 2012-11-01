@@ -22,6 +22,8 @@ import org.jboss.arquillian.core.spi.LoadableExtension;
 import org.jboss.arquillian.daemon.protocol.arquillian.DaemonProtocol;
 
 /**
+ * {@link LoadableExtension} implementation for the Managed Daemon Container
+ *
  * @author <a href="mailto:alr@jboss.org">Andrew Lee Rubinger</a>
  */
 public class ManagedDaemonContainerExtension implements LoadableExtension {
@@ -31,5 +33,4 @@ public class ManagedDaemonContainerExtension implements LoadableExtension {
         builder.service(DeployableContainer.class, ManagedDaemonDeployableContainer.class);
         builder.service(Protocol.class, DaemonProtocol.class);
     }
-
 }
