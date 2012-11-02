@@ -26,27 +26,51 @@ import org.jboss.arquillian.container.test.spi.client.protocol.Protocol;
 import org.jboss.arquillian.container.test.spi.command.CommandCallback;
 
 /**
+ * {@link Protocol} implementation for the Arquillian Server Daemon
+ *
  * @author <a href="mailto:alr@jboss.org">Andrew Lee Rubinger</a>
  */
 public class DaemonProtocol implements Protocol<DaemonProtocolConfiguration> {
 
     public static final ProtocolDescription DESCRIPTION = new ProtocolDescription(DaemonProtocol.class.getSimpleName());
 
+    /**
+     * {@inheritDoc}
+     *
+     * @see org.jboss.arquillian.container.test.spi.client.protocol.Protocol#getProtocolConfigurationClass()
+     */
     @Override
     public Class<DaemonProtocolConfiguration> getProtocolConfigurationClass() {
         return DaemonProtocolConfiguration.class;
     }
 
+    /**
+     * {@inheritDoc}
+     *
+     * @see org.jboss.arquillian.container.test.spi.client.protocol.Protocol#getDescription()
+     */
     @Override
     public ProtocolDescription getDescription() {
         return DESCRIPTION;
     }
 
+    /**
+     * {@inheritDoc}
+     *
+     * @see org.jboss.arquillian.container.test.spi.client.protocol.Protocol#getPackager()
+     */
     @Override
     public DeploymentPackager getPackager() {
         return DaemonDeploymentPackager.INSTANCE;
     }
 
+    /**
+     * {@inheritDoc}
+     *
+     * @see org.jboss.arquillian.container.test.spi.client.protocol.Protocol#getExecutor(org.jboss.arquillian.container.test.spi.client.protocol.ProtocolConfiguration,
+     *      org.jboss.arquillian.container.spi.client.protocol.metadata.ProtocolMetaData,
+     *      org.jboss.arquillian.container.test.spi.command.CommandCallback)
+     */
     @Override
     public ContainerMethodExecutor getExecutor(final DaemonProtocolConfiguration protocolConfiguration,
         final ProtocolMetaData metaData, final CommandCallback callback) {

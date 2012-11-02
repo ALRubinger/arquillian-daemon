@@ -43,6 +43,8 @@ import java.io.UnsupportedEncodingException;
 import java.lang.reflect.Method;
 import java.net.InetSocketAddress;
 import java.nio.charset.Charset;
+import java.security.AccessController;
+import java.security.PrivilegedAction;
 import java.util.HashSet;
 import java.util.NoSuchElementException;
 import java.util.Set;
@@ -338,12 +340,10 @@ class NettyServer implements Server {
                     final ShrinkWrapClassLoader isolatedArchiveCL = new ShrinkWrapClassLoader((ClassLoader) null,
                         archive);
 
-                    // TODO Secured action
-                    final ClassLoader oldCl = Thread.currentThread().getContextClassLoader();
+                    final ClassLoader oldCl = SecurityActions.getTccl();
                     ObjectOutputStream objectOutstream = null;
                     try {
-                        // TODO Secured action
-                        Thread.currentThread().setContextClassLoader(isolatedArchiveCL);
+                        SecurityActions.setTccl(isolatedArchiveCL);
                         final Class<?> testClass;
                         try {
                             testClass = isolatedArchiveCL.loadClass(testClassName);
@@ -376,8 +376,7 @@ class NettyServer implements Server {
                         return;
 
                     } finally {
-                        // TODO Secured action
-                        Thread.currentThread().setContextClassLoader(oldCl);
+                        SecurityActions.setTccl(oldCl);
                         isolatedArchiveCL.close();
                         if (objectOutstream != null) {
                             objectOutstream.close();
@@ -390,7 +389,6 @@ class NettyServer implements Server {
                 }
 
             } catch (final Throwable t) {
-                log.severe(t.getMessage());
                 // Will be captured by any remote process which launched us and is piping in our output
                 t.printStackTrace();
                 NettyServer.sendResponse(ctx, out, WireProtocol.RESPONSE_ERROR_PREFIX
@@ -601,6 +599,42 @@ class NettyServer implements Server {
             throw new RuntimeException("Unsupported encoding", uee);
         }
         ctx.flush();
+    }
+
+    private static final class SecurityActions {
+        private SecurityActions() {
+            throw new UnsupportedOperationException("No instances");
+        }
+
+        private enum GetTcclAction implements PrivilegedAction<ClassLoader> {
+            INSTANCE;
+
+            @Override
+            public ClassLoader run() {
+                return Thread.currentThread().getContextClassLoader();
+            }
+        }
+
+        static ClassLoader getTccl() {
+            if (System.getSecurityManager() == null) {
+                return Thread.currentThread().getContextClassLoader();
+            }
+            return AccessController.doPrivileged(GetTcclAction.INSTANCE);
+        }
+
+        static void setTccl(final ClassLoader cl) {
+            assert cl != null : "ClassLoader must be specified";
+            if (System.getSecurityManager() == null) {
+                Thread.currentThread().setContextClassLoader(cl);
+            }
+            AccessController.doPrivileged(new PrivilegedAction<Void>() {
+                @Override
+                public Void run() {
+                    Thread.currentThread().setContextClassLoader(cl);
+                    return null;
+                }
+            });
+        }
     }
 
 }

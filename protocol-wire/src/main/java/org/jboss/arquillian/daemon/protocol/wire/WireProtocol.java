@@ -50,7 +50,7 @@ public interface WireProtocol {
     /**
      * Marks the end of a command
      */
-    String COMMAND_EOF_DELIMITER = "<<EOF>>";
+    String COMMAND_EOF_DELIMITER = "<<EOF";
 
     /**
      * To be prepended to a valid current deployment name

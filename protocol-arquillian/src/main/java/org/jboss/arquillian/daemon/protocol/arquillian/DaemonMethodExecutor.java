@@ -28,10 +28,14 @@ import org.jboss.arquillian.test.spi.TestMethodExecutor;
 import org.jboss.arquillian.test.spi.TestResult;
 
 /**
+ * {@link ContainerMethodExecutor} implementation which executes tests on the remote JVM Arquillian Server Daemon and
+ * returns the {@link TestResult} it returns.
+ *
  * @author <a href="mailto:alr@jboss.org">Andrew Lee Rubinger</a>
  */
 public class DaemonMethodExecutor implements ContainerMethodExecutor {
 
+    @SuppressWarnings("unused")
     private static final Logger log = Logger.getLogger(DaemonMethodExecutor.class.getName());
     private static final String SPACE = " ";
 
@@ -54,7 +58,7 @@ public class DaemonMethodExecutor implements ContainerMethodExecutor {
 
         assert testMethodExecutor != null : "Test method executor is required";
 
-        // Invoke
+        // Build the String request according to the wire protocol
         final StringBuilder builder = new StringBuilder();
         builder.append(WireProtocol.COMMAND_TEST_PREFIX);
         builder.append(context.getName());
@@ -65,14 +69,13 @@ public class DaemonMethodExecutor implements ContainerMethodExecutor {
         builder.append(WireProtocol.COMMAND_EOF_DELIMITER);
         final String testCommand = builder.toString();
         final PrintWriter writer = this.context.getWriter();
+
+        // Request
+        writer.write(testCommand);
+        writer.flush();
+
         try {
-
-            // Request
-            writer.write(testCommand);
-            writer.flush();
-
             // Read response
-            // TODO This ctor needs to run in accesscontroller.doprivileged
             final ObjectInputStream response = new ObjectInputStream(
                 new NoCloseInputStream(context.getSocketInstream()));
             final TestResult testResult = (TestResult) response.readObject();
@@ -86,6 +89,11 @@ public class DaemonMethodExecutor implements ContainerMethodExecutor {
         }
     }
 
+    /**
+     * Wrapper which does forwards all operations except {@link InputStream#close()} to the delegate
+     *
+     * @author <a href="mailto:alr@jboss.org">Andrew Lee Rubinger</a>
+     */
     private static final class NoCloseInputStream extends InputStream {
 
         private final InputStream delegate;

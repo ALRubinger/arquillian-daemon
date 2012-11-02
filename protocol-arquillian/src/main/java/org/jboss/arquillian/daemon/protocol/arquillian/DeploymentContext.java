@@ -26,7 +26,8 @@ import org.jboss.arquillian.container.spi.client.protocol.metadata.NamedContext;
 /**
  * {@link NamedContext} implementation backed by streams and reader/writer to interact with the Arquillian Server Daemon
  * over wire protocol. No caller should close any of the resources in this {@link DeploymentContext}; they are to be
- * managed by the establishing container.
+ * managed by the establishing container. Essentially acts as a value object to hand off resources between the container
+ * and the {@link DaemonMethodExecutor}
  *
  * @author <a href="mailto:alr@jboss.org">Andrew Lee Rubinger</a>
  */
