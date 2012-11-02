@@ -335,7 +335,11 @@ class NettyServer implements Server {
                     final ShrinkWrapClassLoader isolatedArchiveCL = new ShrinkWrapClassLoader((ClassLoader) null,
                         archive);
 
+                    // TODO Secured action
+                    final ClassLoader oldCl = Thread.currentThread().getContextClassLoader();
                     try {
+                        // TODO Secured action
+                        Thread.currentThread().setContextClassLoader(isolatedArchiveCL);
                         final Class<?> testClass;
                         try {
                             testClass = isolatedArchiveCL.loadClass(testClassName);
@@ -358,12 +362,20 @@ class NettyServer implements Server {
                             String.class);
                         final Object testResult = executeMethod.invoke(testRunner, testClass, methodName);
                         log.info(testResult.toString());
+                        final Class<?> testResultClass = testResult.getClass();
+                        final Method getThrowableMethod = testResultClass.getMethod("getThrowable");
+                        final Object throwable = getThrowableMethod.invoke(testResult);
+                        // if (throwable != null) {
+                        // ((Throwable) throwable).printStackTrace();
+                        // }
+
                     } finally {
+                        // TODO Secured action
+                        Thread.currentThread().setContextClassLoader(oldCl);
                         isolatedArchiveCL.close();
                     }
 
                     NettyServer.sendResponse(ctx, out, WireProtocol.RESPONSE_OK_PREFIX);
-
                 }
                 // Unsupported command
                 else {
