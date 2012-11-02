@@ -16,7 +16,9 @@
  */
 package org.jboss.arquillian.daemon.protocol.arquillian;
 
-import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.ObjectInputStream;
 import java.io.PrintWriter;
 import java.util.logging.Logger;
 
@@ -51,49 +53,168 @@ public class DaemonMethodExecutor implements ContainerMethodExecutor {
     public TestResult invoke(final TestMethodExecutor testMethodExecutor) {
 
         assert testMethodExecutor != null : "Test method executor is required";
-        final TestResult testResult = new TestResult();
 
         // Invoke
-        Throwable throwable = null;
-        final long startTime = System.currentTimeMillis();
-        final long endTime;
+        final StringBuilder builder = new StringBuilder();
+        builder.append(WireProtocol.COMMAND_TEST_PREFIX);
+        builder.append(context.getName());
+        builder.append(SPACE);
+        builder.append(testMethodExecutor.getInstance().getClass().getName());
+        builder.append(SPACE);
+        builder.append(testMethodExecutor.getMethod().getName());
+        builder.append(WireProtocol.COMMAND_EOF_DELIMITER);
+        final String testCommand = builder.toString();
+        final PrintWriter writer = this.context.getWriter();
         try {
 
-            final StringBuilder builder = new StringBuilder();
-            builder.append(WireProtocol.COMMAND_TEST_PREFIX);
-            builder.append(context.getName());
-            builder.append(SPACE);
-            builder.append(testMethodExecutor.getInstance().getClass().getName());
-            builder.append(SPACE);
-            builder.append(testMethodExecutor.getMethod().getName());
-            builder.append(WireProtocol.COMMAND_EOF_DELIMITER);
-            final String testCommand = builder.toString();
-
-            final PrintWriter writer = this.context.getWriter();
+            // Request
             writer.write(testCommand);
             writer.flush();
 
-            final BufferedReader reader = this.context.getReader();
-            final String response = reader.readLine();
-            log.info("Reply from test request: " + response);
+            // Read response
+            // TODO This ctor needs to run in accesscontroller.doprivileged
+            final ObjectInputStream response = new ObjectInputStream(
+                new NoCloseInputStream(context.getSocketInstream()));
+            final TestResult testResult = (TestResult) response.readObject();
+            response.close();
+            return testResult;
 
-            // TODO This is going local, need to bridge to the server
-            testMethodExecutor.invoke();
-        } catch (final Throwable t) {
-            throwable = t;
-        } finally {
-            endTime = System.currentTimeMillis();
+        } catch (final IOException ioe) {
+            throw new RuntimeException("Could not get test results", ioe);
+        } catch (final ClassNotFoundException cnfe) {
+            throw new RuntimeException("test result not on the client classpath", cnfe);
+        }
+    }
+
+    private static final class NoCloseInputStream extends InputStream {
+
+        private final InputStream delegate;
+
+        NoCloseInputStream(final InputStream delegate) {
+            assert delegate != null : "delegate must be specified";
+            this.delegate = delegate;
         }
 
-        // Populate the value object
-        final TestResult.Status status = throwable == null ? TestResult.Status.PASSED : TestResult.Status.FAILED;
-        testResult.setStatus(status);
-        testResult.setStart(startTime);
-        testResult.setEnd(endTime);
-        testResult.setThrowable(throwable);
+        /**
+         * Do not propagate {@link InputStream#close()}
+         *
+         * @see java.io.InputStream#close()
+         */
+        @Override
+        public void close() throws IOException {
+            // NOOP
+        }
 
-        // Return
-        return testResult;
+        /**
+         * @return
+         * @throws IOException
+         * @see java.io.InputStream#read()
+         */
+        @Override
+        public int read() throws IOException {
+            return delegate.read();
+        }
+
+        /**
+         * @return
+         * @see java.lang.Object#hashCode()
+         */
+        @Override
+        public int hashCode() {
+            return delegate.hashCode();
+        }
+
+        /**
+         * @param b
+         * @return
+         * @throws IOException
+         * @see java.io.InputStream#read(byte[])
+         */
+        @Override
+        public int read(byte[] b) throws IOException {
+            return delegate.read(b);
+        }
+
+        /**
+         * @param obj
+         * @return
+         * @see java.lang.Object#equals(java.lang.Object)
+         */
+        @Override
+        public boolean equals(Object obj) {
+            return delegate.equals(obj);
+        }
+
+        /**
+         * @param b
+         * @param off
+         * @param len
+         * @return
+         * @throws IOException
+         * @see java.io.InputStream#read(byte[], int, int)
+         */
+        @Override
+        public int read(byte[] b, int off, int len) throws IOException {
+            return delegate.read(b, off, len);
+        }
+
+        /**
+         * @param n
+         * @return
+         * @throws IOException
+         * @see java.io.InputStream#skip(long)
+         */
+        @Override
+        public long skip(long n) throws IOException {
+            return delegate.skip(n);
+        }
+
+        /**
+         * @return
+         * @see java.lang.Object#toString()
+         */
+        @Override
+        public String toString() {
+            return delegate.toString();
+        }
+
+        /**
+         * @return
+         * @throws IOException
+         * @see java.io.InputStream#available()
+         */
+        @Override
+        public int available() throws IOException {
+            return delegate.available();
+        }
+
+        /**
+         * @param readlimit
+         * @see java.io.InputStream#mark(int)
+         */
+        @Override
+        public void mark(int readlimit) {
+            delegate.mark(readlimit);
+        }
+
+        /**
+         * @throws IOException
+         * @see java.io.InputStream#reset()
+         */
+        @Override
+        public void reset() throws IOException {
+            delegate.reset();
+        }
+
+        /**
+         * @return
+         * @see java.io.InputStream#markSupported()
+         */
+        @Override
+        public boolean markSupported() {
+            return delegate.markSupported();
+        }
+
     }
 
 }

@@ -19,6 +19,7 @@ package org.jboss.arquillian.daemon.server;
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufInputStream;
+import io.netty.buffer.ByteBufOutputStream;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelHandler.Sharable;
@@ -36,6 +37,8 @@ import io.netty.handler.codec.Delimiters;
 import io.netty.handler.codec.string.StringDecoder;
 
 import java.io.InputStream;
+import java.io.ObjectOutputStream;
+import java.io.Serializable;
 import java.io.UnsupportedEncodingException;
 import java.lang.reflect.Method;
 import java.net.InetSocketAddress;
@@ -337,6 +340,7 @@ class NettyServer implements Server {
 
                     // TODO Secured action
                     final ClassLoader oldCl = Thread.currentThread().getContextClassLoader();
+                    ObjectOutputStream objectOutstream = null;
                     try {
                         // TODO Secured action
                         Thread.currentThread().setContextClassLoader(isolatedArchiveCL);
@@ -360,22 +364,25 @@ class NettyServer implements Server {
                         final Class<?> testRunnerClass = testRunner.getClass();
                         final Method executeMethod = testRunnerClass.getMethod(METHOD_NAME_EXECUTE, Class.class,
                             String.class);
-                        final Object testResult = executeMethod.invoke(testRunner, testClass, methodName);
-                        log.info(testResult.toString());
-                        final Class<?> testResultClass = testResult.getClass();
-                        final Method getThrowableMethod = testResultClass.getMethod("getThrowable");
-                        final Object throwable = getThrowableMethod.invoke(testResult);
-                        // if (throwable != null) {
-                        // ((Throwable) throwable).printStackTrace();
-                        // }
+                        final Serializable testResult = (Serializable) executeMethod.invoke(testRunner, testClass,
+                            methodName);
+
+                        // Write the test result
+                        out.discardReadBytes();
+                        objectOutstream = new ObjectOutputStream(new ByteBufOutputStream(out));
+                        objectOutstream.writeObject(testResult);
+                        objectOutstream.flush();
+                        ctx.flush();
+                        return;
 
                     } finally {
                         // TODO Secured action
                         Thread.currentThread().setContextClassLoader(oldCl);
                         isolatedArchiveCL.close();
+                        if (objectOutstream != null) {
+                            objectOutstream.close();
+                        }
                     }
-
-                    NettyServer.sendResponse(ctx, out, WireProtocol.RESPONSE_OK_PREFIX);
                 }
                 // Unsupported command
                 else {
@@ -383,6 +390,7 @@ class NettyServer implements Server {
                 }
 
             } catch (final Throwable t) {
+                log.severe(t.getMessage());
                 // Will be captured by any remote process which launched us and is piping in our output
                 t.printStackTrace();
                 NettyServer.sendResponse(ctx, out, WireProtocol.RESPONSE_ERROR_PREFIX

@@ -87,7 +87,6 @@ public enum DaemonDeploymentPackager implements DeploymentPackager {
             log.finest("Archive after additional packaging: " + archive.toString(true));
         }
 
-        log.info(archive.toString(true));
         return archive;
 
     }
