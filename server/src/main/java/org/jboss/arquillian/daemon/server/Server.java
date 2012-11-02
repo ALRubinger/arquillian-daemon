@@ -62,6 +62,6 @@ public interface Server {
      * @throws IllegalStateException
      *             If {@link Server#isRunning()} is <code>false</code>
      */
-    InetSocketAddress getBindAddress() throws IllegalStateException;
+    InetSocketAddress getBoundAddress() throws IllegalStateException;
 
 }

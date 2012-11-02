@@ -40,40 +40,24 @@ import java.io.InputStream;
 import java.io.ObjectOutputStream;
 import java.io.Serializable;
 import java.io.UnsupportedEncodingException;
-import java.lang.reflect.Method;
 import java.net.InetSocketAddress;
 import java.nio.charset.Charset;
-import java.security.AccessController;
-import java.security.PrivilegedAction;
-import java.util.HashSet;
 import java.util.NoSuchElementException;
-import java.util.Set;
 import java.util.StringTokenizer;
-import java.util.concurrent.Callable;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.logging.Handler;
 import java.util.logging.Level;
-import java.util.logging.LogRecord;
 import java.util.logging.Logger;
 
 import org.jboss.arquillian.daemon.protocol.wire.WireProtocol;
-import org.jboss.shrinkwrap.api.ConfigurationBuilder;
-import org.jboss.shrinkwrap.api.Domain;
 import org.jboss.shrinkwrap.api.GenericArchive;
-import org.jboss.shrinkwrap.api.ShrinkWrap;
-import org.jboss.shrinkwrap.api.classloader.ShrinkWrapClassLoader;
 import org.jboss.shrinkwrap.api.importer.ZipImporter;
 
 /**
- * Netty-based implementation of a {@link Server}; not thread-safe (though invoking operations through its communication
- * channels is).
+ * Netty-based implementation of a {@link Server}; not thread-safe via the Java API (though invoking wire protocol
+ * operations through its communication channels is). Responsible for handling I/O aspects of the server daemon.
  *
  * @author <a href="mailto:alr@jboss.org">Andrew Lee Rubinger</a>
  */
-class NettyServer implements Server {
+final class NettyServer extends ServerBase implements Server {
 
     private static final Logger log = Logger.getLogger(NettyServer.class.getName());
     private static final EofDecoder EOF_DECODER;
@@ -93,53 +77,24 @@ class NettyServer implements Server {
     private static final String[] NAME_CHANNEL_HANDLERS = { NAME_CHANNEL_HANDLER_EOF,
         NAME_CHANNEL_HANDLER_ACTION_CONTROLLER, NAME_CHANNEL_HANDLER_STRING_DECODER,
         NAME_CHANNEL_HANDLER_FRAME_DECODER, NAME_CHANNEL_HANDLER_DEPLOY_HANDLER, NAME_CHANNEL_HANDLER_COMMAND };
-    private static final String CLASS_NAME_ARQ_TEST_RUNNERS = "org.jboss.arquillian.container.test.spi.util.TestRunners";
-    private static final String METHOD_NAME_GET_TEST_RUNNER = "getTestRunner";
-    private static final String METHOD_NAME_EXECUTE = "execute";
 
-    private ExecutorService shutdownService;
     private ServerBootstrap bootstrap;
-    private boolean running;
-    private InetSocketAddress boundAddress;
-    private final InetSocketAddress toBindAddress;
-    private final ConcurrentMap<String, GenericArchive> deployedArchives;
-    private final Domain shrinkwrapDomain;
 
     NettyServer(final InetSocketAddress bindAddress) {
-        // Precondition checks
-        assert bindAddress != null : "Bind address must be specified";
-
-        // Determine the ClassLoader to use in creating the SW Domain
-        final ClassLoader thisCl = NettyServer.class.getClassLoader();
-        final Set<ClassLoader> classloaders = new HashSet<ClassLoader>(1);
-        classloaders.add(thisCl);
-        if (log.isLoggable(Level.FINEST)) {
-            log.finest("Using ClassLoader for ShrinkWrap Domain: " + thisCl);
-        }
-        final Domain shrinkwrapDomain = ShrinkWrap.createDomain(new ConfigurationBuilder().classLoaders(classloaders));
-
-        // Set
-        this.toBindAddress = bindAddress;
-        this.deployedArchives = new ConcurrentHashMap<String, GenericArchive>();
-        this.shrinkwrapDomain = shrinkwrapDomain;
+        super(bindAddress);
     }
 
     /**
      * {@inheritDoc}
      *
-     * @see org.jboss.arquillian.daemon.server.Server#start()
+     * @see org.jboss.arquillian.daemon.server.ServerBase#startInternal()
      */
     @Override
-    public void start() throws ServerLifecycleException, IllegalStateException {
-
-        // Precondition checks
-        if (this.isRunning()) {
-            throw new IllegalStateException("Already running");
-        }
+    protected void startInternal() throws ServerLifecycleException, IllegalStateException {
 
         // Set up Netty Boostrap
         final ServerBootstrap bootstrap = new ServerBootstrap().group(new NioEventLoopGroup(), new NioEventLoopGroup())
-            .channel(NioServerSocketChannel.class).localAddress(this.toBindAddress)
+            .channel(NioServerSocketChannel.class).localAddress(this.getBindAddress())
             .childHandler(new ChannelInitializer<SocketChannel>() {
                 @Override
                 public void initChannel(final SocketChannel channel) throws Exception {
@@ -161,89 +116,19 @@ class NettyServer implements Server {
             throw new ServerLifecycleException("Encountered error in binding; could not start server.", re);
         }
         // Set bound address
-        boundAddress = ((InetSocketAddress) openChannel.channel().localAddress());
-        if (log.isLoggable(Level.INFO)) {
-            log.info("Server started on " + boundAddress.getHostName() + ":" + boundAddress.getPort());
-        }
-        // Running
-        running = true;
-        // Create the shutdown service
-        this.shutdownService = Executors.newSingleThreadExecutor();
+        final InetSocketAddress boundAddress = ((InetSocketAddress) openChannel.channel().localAddress());
+        this.setBoundAddress(boundAddress);
     }
 
     /**
      * {@inheritDoc}
      *
-     * @see org.jboss.arquillian.daemon.server.Server#isRunning()
+     * @see org.jboss.arquillian.daemon.server.ServerBase#stopInternal()
      */
     @Override
-    public boolean isRunning() {
-        return running;
-    }
-
-    /**
-     * {@inheritDoc}
-     *
-     * @see org.jboss.arquillian.daemon.server.Server#stop()
-     */
-    @Override
-    public void stop() throws ServerLifecycleException, IllegalStateException {
-
-        // Use an anonymous logger because the JUL LogManager will not log after process shutdown has been received
-        final Logger log = Logger.getAnonymousLogger();
-        log.addHandler(new Handler() {
-
-            private final String PREFIX = "[" + NettyServer.class.getSimpleName() + "] ";
-
-            @Override
-            public void publish(final LogRecord record) {
-                System.out.println(PREFIX + record.getMessage());
-
-            }
-
-            @Override
-            public void flush() {
-
-            }
-
-            @Override
-            public void close() throws SecurityException {
-            }
-        });
-
-        if (!this.isRunning()) {
-            throw new IllegalStateException("Server is not running");
-        }
-
-        if (log.isLoggable(Level.INFO)) {
-            log.info("Requesting shutdown...");
-        }
-
+    protected void stopInternal() throws ServerLifecycleException, IllegalStateException {
         // Shutdown
         bootstrap.shutdown();
-        shutdownService.shutdownNow();
-        shutdownService = null;
-
-        // Not running
-        running = false;
-        boundAddress = null;
-
-        if (log.isLoggable(Level.INFO)) {
-            log.info("Server shutdown.");
-        }
-    }
-
-    /**
-     * {@inheritDoc}
-     *
-     * @see org.jboss.arquillian.daemon.server.Server#getBindAddress()
-     */
-    @Override
-    public InetSocketAddress getBindAddress() throws IllegalStateException {
-        if (!this.isRunning()) {
-            throw new IllegalStateException("Server is not running");
-        }
-        return this.boundAddress;
     }
 
     /**
@@ -281,15 +166,9 @@ class NettyServer implements Server {
                     // Set the response to tell the client OK
                     NettyServer.sendResponse(ctx, out, WireProtocol.RESPONSE_OK_PREFIX + message);
 
-                    // Now stop in another thread (after we send the response, else we'll prematurely close the
+                    // Now stop in another thread (after we send the response, else we might prematurely close the
                     // connection)
-                    shutdownService.submit(new Callable<Void>() {
-                        @Override
-                        public Void call() throws Exception {
-                            NettyServer.this.stop();
-                            return null;
-                        }
-                    });
+                    NettyServer.this.stopAsync();
                 }
                 // Undeployment
                 else if (message.startsWith(WireProtocol.COMMAND_UNDEPLOY_PREFIX)) {
@@ -300,7 +179,7 @@ class NettyServer implements Server {
                     if (log.isLoggable(Level.FINEST)) {
                         log.finest("Requesting undeployment of: " + deploymentName);
                     }
-                    final GenericArchive removedArchive = NettyServer.this.deployedArchives.remove(deploymentName);
+                    final GenericArchive removedArchive = NettyServer.this.getDeployedArchives().remove(deploymentName);
 
                     // Check that we resulted in undeployment
                     if (removedArchive == null) {
@@ -331,42 +210,11 @@ class NettyServer implements Server {
                     final String testClassName = tokenizer.nextToken();
                     final String methodName = tokenizer.nextToken();
 
-                    final GenericArchive archive = NettyServer.this.deployedArchives.get(archiveId);
-                    if (archive == null) {
-                        throw new IllegalStateException("Archive with ID " + archiveId + " is not deployed");
-                    }
+                    // Execute the test and get the result
+                    final Serializable testResult = NettyServer.this.executeTest(archiveId, testClassName, methodName);
 
-                    // Use a ClassLoader with explicitly null parent to achieve isolation from --classpath
-                    final ShrinkWrapClassLoader isolatedArchiveCL = new ShrinkWrapClassLoader((ClassLoader) null,
-                        archive);
-
-                    final ClassLoader oldCl = SecurityActions.getTccl();
                     ObjectOutputStream objectOutstream = null;
                     try {
-                        SecurityActions.setTccl(isolatedArchiveCL);
-                        final Class<?> testClass;
-                        try {
-                            testClass = isolatedArchiveCL.loadClass(testClassName);
-                        } catch (final ClassNotFoundException cnfe) {
-                            throw new IllegalStateException("Could not load class " + testClassName
-                                + " from deployed archive: " + archive.toString());
-                        }
-                        final Class<?> testRunnersClass;
-                        try {
-                            testRunnersClass = isolatedArchiveCL.loadClass(CLASS_NAME_ARQ_TEST_RUNNERS);
-                        } catch (final ClassNotFoundException cnfe) {
-                            throw new IllegalStateException("Could not load class " + CLASS_NAME_ARQ_TEST_RUNNERS
-                                + " from deployed archive: " + archive.toString());
-                        }
-                        final Method getTestRunnerMethod = testRunnersClass.getMethod(METHOD_NAME_GET_TEST_RUNNER,
-                            ClassLoader.class);
-                        final Object testRunner = getTestRunnerMethod.invoke(null, isolatedArchiveCL);
-                        final Class<?> testRunnerClass = testRunner.getClass();
-                        final Method executeMethod = testRunnerClass.getMethod(METHOD_NAME_EXECUTE, Class.class,
-                            String.class);
-                        final Serializable testResult = (Serializable) executeMethod.invoke(testRunner, testClass,
-                            methodName);
-
                         // Write the test result
                         out.discardReadBytes();
                         objectOutstream = new ObjectOutputStream(new ByteBufOutputStream(out));
@@ -376,8 +224,6 @@ class NettyServer implements Server {
                         return;
 
                     } finally {
-                        SecurityActions.setTccl(oldCl);
-                        isolatedArchiveCL.close();
                         if (objectOutstream != null) {
                             objectOutstream.close();
                         }
@@ -437,8 +283,8 @@ class NettyServer implements Server {
             try {
                 // Read in the archive using the isolated CL context of this domain
                 final InputStream instream = new ByteBufInputStream(in);
-                final GenericArchive archive = shrinkwrapDomain.getArchiveFactory().create(ZipImporter.class)
-                    .importFrom(instream).as(GenericArchive.class);
+                final GenericArchive archive = NettyServer.this.getShrinkwrapDomain().getArchiveFactory()
+                    .create(ZipImporter.class).importFrom(instream).as(GenericArchive.class);
                 instream.close();
                 if (log.isLoggable(Level.FINEST)) {
                     log.finest("Got archive: " + archive.toString(true));
@@ -446,7 +292,7 @@ class NettyServer implements Server {
 
                 // Store the archive
                 final String id = archive.getId();
-                NettyServer.this.deployedArchives.put(id, archive);
+                NettyServer.this.getDeployedArchives().put(id, archive);
 
                 // Tell the client OK, and let it know the ID of the archive (so it may be undeployed)
                 final ByteBuf out = ctx.nextOutboundByteBuffer();
@@ -599,42 +445,6 @@ class NettyServer implements Server {
             throw new RuntimeException("Unsupported encoding", uee);
         }
         ctx.flush();
-    }
-
-    private static final class SecurityActions {
-        private SecurityActions() {
-            throw new UnsupportedOperationException("No instances");
-        }
-
-        private enum GetTcclAction implements PrivilegedAction<ClassLoader> {
-            INSTANCE;
-
-            @Override
-            public ClassLoader run() {
-                return Thread.currentThread().getContextClassLoader();
-            }
-        }
-
-        static ClassLoader getTccl() {
-            if (System.getSecurityManager() == null) {
-                return Thread.currentThread().getContextClassLoader();
-            }
-            return AccessController.doPrivileged(GetTcclAction.INSTANCE);
-        }
-
-        static void setTccl(final ClassLoader cl) {
-            assert cl != null : "ClassLoader must be specified";
-            if (System.getSecurityManager() == null) {
-                Thread.currentThread().setContextClassLoader(cl);
-            }
-            AccessController.doPrivileged(new PrivilegedAction<Void>() {
-                @Override
-                public Void run() {
-                    Thread.currentThread().setContextClassLoader(cl);
-                    return null;
-                }
-            });
-        }
     }
 
 }
