@@ -18,7 +18,12 @@ package org.jboss.arquillian.daemon.server;
 
 import java.net.InetSocketAddress;
 
+import org.jboss.arquillian.daemon.protocol.wire.WireProtocol;
+
 /**
+ * Defines operations for the Arquillian Server Daemon; other non-Java API operations achieved via the
+ * {@link WireProtocol}.
+ *
  * @author <a href="mailto:alr@jboss.org">Andrew Lee Rubinger</a>
  */
 public interface Server {

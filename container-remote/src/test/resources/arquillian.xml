@@ -7,7 +7,6 @@
         <configuration>
             <property name="host">localhost</property>
             <property name="port">12345</property>
-            <property name="serverJarFile">target/arquillian-daemon-main.jar</property>
         </configuration>
     </container>
 </arquillian>

@@ -16,52 +16,37 @@
  */
 package org.jboss.arquillian.daemon.container.managed;
 
-import java.io.BufferedReader;
 import java.io.File;
 import java.io.IOException;
-import java.io.InputStream;
-import java.io.InputStreamReader;
-import java.io.OutputStream;
-import java.io.OutputStreamWriter;
-import java.io.PrintWriter;
 import java.lang.ProcessBuilder.Redirect;
-import java.net.ConnectException;
 import java.net.InetSocketAddress;
-import java.net.Socket;
+import java.security.AccessController;
+import java.security.PrivilegedAction;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
 import org.jboss.arquillian.container.spi.client.container.DeployableContainer;
-import org.jboss.arquillian.container.spi.client.container.DeploymentException;
 import org.jboss.arquillian.container.spi.client.container.LifecycleException;
-import org.jboss.arquillian.container.spi.client.protocol.ProtocolDescription;
-import org.jboss.arquillian.container.spi.client.protocol.metadata.ProtocolMetaData;
-import org.jboss.arquillian.daemon.protocol.arquillian.DaemonProtocol;
-import org.jboss.arquillian.daemon.protocol.arquillian.DeploymentContext;
+import org.jboss.arquillian.daemon.container.common.DaemonDeployableContainerBase;
 import org.jboss.arquillian.daemon.protocol.wire.WireProtocol;
-import org.jboss.shrinkwrap.api.Archive;
-import org.jboss.shrinkwrap.api.exporter.ZipExporter;
-import org.jboss.shrinkwrap.descriptor.api.Descriptor;
 
 /**
+ * {@link DeployableContainer} implementation for Managed Arquillian Server Daemon (handles start/stop of the server as
+ * part of lifecycle).
+ *
  * @author <a href="mailto:alr@jboss.org">Andrew Lee Rubinger</a>
  */
-public class ManagedDaemonDeployableContainer implements DeployableContainer<ManagedDaemonContainerConfiguration> {
+public class ManagedDaemonDeployableContainer extends
+    DaemonDeployableContainerBase<ManagedDaemonContainerConfiguration> implements
+    DeployableContainer<ManagedDaemonContainerConfiguration> {
 
     private static final Logger log = Logger.getLogger(ManagedDaemonDeployableContainer.class.getName());
-    private static final String ERROR_MESSAGE_DESCRIPTORS_UNSUPPORTED = "Descriptor deployment not supported";
+    private static final String SYSPROP_KEY_JAVA_HOME = "java.home";
 
-    private Thread shutdownThread;
-
-    private InetSocketAddress remoteAddress;
-    private Socket socket;
-    private OutputStream socketOutstream;
-    private InputStream socketInstream;
-    private BufferedReader reader;
-    private PrintWriter writer;
-    private String deploymentName;
+    private Thread shutdownHookThread;
+    private File serverjarFile;
     private Process remoteProcess;
 
     /**
@@ -74,27 +59,36 @@ public class ManagedDaemonDeployableContainer implements DeployableContainer<Man
         return ManagedDaemonContainerConfiguration.class;
     }
 
+    /**
+     * {@inheritDoc}
+     *
+     * @see org.jboss.arquillian.daemon.container.common.DaemonDeployableContainerBase#setup(org.jboss.arquillian.daemon.container.common.DaemonContainerConfigurationBase)
+     */
     @Override
     public void setup(final ManagedDaemonContainerConfiguration configuration) {
-        final String remoteHost = configuration.getHost();
-        final String remotePort = configuration.getPort();
-        final InetSocketAddress address = new InetSocketAddress(remoteHost, Integer.parseInt(remotePort));
-        this.remoteAddress = address;
-
+        super.setup(configuration);
+        serverjarFile = new File(configuration.getServerJarFile());
     }
 
+    /**
+     * Starts the process, then forwards control to {@link DaemonDeployableContainerBase#start()} to connect.
+     *
+     * @see org.jboss.arquillian.daemon.container.common.DaemonDeployableContainerBase#start()
+     */
     @Override
     public void start() throws LifecycleException {
 
-        final File file = new File("target/arquillian-daemon-main.jar"); // TODO Props
-        final File javaHome = new File(System.getProperty("java.home")); // TODO Security Action
+        // Build the launch command
+        final File javaHome = new File(SecurityActions.getSystemProperty(SYSPROP_KEY_JAVA_HOME));
         final List<String> command = new ArrayList<String>(10);
         command.add(javaHome.getAbsolutePath() + "/bin/java");
         command.add("-jar");
-        command.add(file.getAbsolutePath());
+        command.add(serverjarFile.getAbsolutePath());
+        final InetSocketAddress remoteAddress = this.getRemoteAddress();
         command.add(remoteAddress.getHostString());
         command.add(Integer.toString(remoteAddress.getPort()));
 
+        // Launch the process
         final ProcessBuilder processBuilder = new ProcessBuilder(command);
         processBuilder.redirectErrorStream(true);
         processBuilder.redirectOutput(Redirect.INHERIT);
@@ -106,6 +100,7 @@ public class ManagedDaemonDeployableContainer implements DeployableContainer<Man
             throw new LifecycleException("Could not start container", e);
         }
 
+        // Add a shutdown hook for when this current process terminates to kill the one we've launched
         final Runnable shutdownServerRunnable = new Runnable() {
             @Override
             public void run() {
@@ -120,85 +115,35 @@ public class ManagedDaemonDeployableContainer implements DeployableContainer<Man
                 }
             }
         };
+        shutdownHookThread = new Thread(shutdownServerRunnable);
+        Runtime.getRuntime().addShutdownHook(shutdownHookThread);
 
-        shutdownThread = new Thread(shutdownServerRunnable);
-        Runtime.getRuntime().addShutdownHook(shutdownThread);
-
-        // Open up remote resources
-        try {
-
-            final long startTime = System.currentTimeMillis();
-            final long acceptableTime = startTime * 1000 * 10; // 10 seconds from now
-            Socket socket = null;
-            while (true) {
-                try {
-                    // TODO Security Action
-                    socket = new Socket(remoteAddress.getHostString(), remoteAddress.getPort());
-                    if (log.isLoggable(Level.FINEST)) {
-                        log.finest("Got connection to " + remoteAddress.toString());
-                    }
-                    break;
-                } catch (final ConnectException ce) {
-                    if (log.isLoggable(Level.FINEST)) {
-                        log.finest("No connection yet available to remote process");
-                    }
-                    final long currentTime = System.currentTimeMillis();
-                    // Time expired?
-                    if (currentTime > acceptableTime) {
-                        throw ce;
-                    }
-                    // Sleep and try again
-                    try {
-                        Thread.sleep(200);
-                    } catch (final InterruptedException e) {
-                        Thread.interrupted();
-                        throw new RuntimeException("No one should be interrupting us while we're waiting to connect", e);
-                    }
-                }
-            }
-            assert socket != null : "Socket should have been connected";
-            this.socket = socket;
-            final OutputStream socketOutstream = socket.getOutputStream();
-            this.socketOutstream = socketOutstream;
-            final PrintWriter writer = new PrintWriter(new OutputStreamWriter(socketOutstream, WireProtocol.CHARSET),
-                true);
-            this.writer = writer;
-            final InputStream socketInstream = socket.getInputStream();
-            this.socketInstream = socketInstream;
-            final BufferedReader reader = new BufferedReader(new InputStreamReader(socketInstream));
-            this.reader = reader;
-        } catch (final IOException ioe) {
-            this.closeRemoteResources();
-            throw new LifecycleException("Could not open connection to remote process", ioe);
-        }
+        // Call the super implementation (to handle connect)
+        super.start();
     }
 
+    /**
+     * {@inheritDoc}
+     *
+     * @see org.jboss.arquillian.daemon.container.common.DaemonDeployableContainerBase#stop()
+     */
     @Override
     public void stop() throws LifecycleException {
 
         try {
             // Write the stop command
-            writer.print(WireProtocol.COMMAND_STOP);
+            this.getWriter().print(WireProtocol.COMMAND_STOP);
             // Terminate the command and flush
-            writer.print(WireProtocol.COMMAND_EOF_DELIMITER);
-            writer.flush();
+            this.getWriter().print(WireProtocol.COMMAND_EOF_DELIMITER);
+            this.getWriter().flush();
 
             // Block until we get "OK" response
-            final String response = reader.readLine();
+            final String response = this.getReader().readLine();
             if (log.isLoggable(Level.FINEST)) {
                 log.finest("Response from stop: " + response);
             }
 
             log.info("Response from stop: " + response);
-
-            // Block until the process is killed
-            try {
-                remoteProcess.waitFor();
-            } catch (final InterruptedException ie) {
-                Thread.interrupted();
-            }
-            // Null out
-            remoteProcess = null;
 
         } catch (final IOException ioe) {
             throw new LifecycleException(
@@ -206,161 +151,36 @@ public class ManagedDaemonDeployableContainer implements DeployableContainer<Man
         } catch (final RuntimeException re) {
             throw new LifecycleException("Unexpected problem encountered during stop", re);
         } finally {
-            // Always close up
-            this.closeRemoteResources();
+            // Call super implementation to close up resources
+            super.stop();
         }
-    }
 
-    /**
-     * {@inheritDoc}
-     *
-     * @see org.jboss.arquillian.container.spi.client.container.DeployableContainer#getDefaultProtocol()
-     */
-    @Override
-    public ProtocolDescription getDefaultProtocol() {
-        return DaemonProtocol.DESCRIPTION;
-    }
-
-    @Override
-    public ProtocolMetaData deploy(final Archive<?> archive) throws DeploymentException {
-
-        final String deploymentName;
+        // Block until the process is killed
         try {
-
-            // Write the deploy command prefix and flush it
-            writer.print(WireProtocol.COMMAND_DEPLOY_PREFIX);
-            writer.flush();
-            // Now write the archive
-            archive.as(ZipExporter.class).exportTo(socketOutstream);
-            socketOutstream.flush();
-            // Terminate the command
-            writer.write(WireProtocol.COMMAND_EOF_DELIMITER);
-            writer.flush();
-
-            // Block until we get "OK" response
-            final String response = reader.readLine();
-            if (!response.startsWith(WireProtocol.RESPONSE_OK_PREFIX)) {
-                throw new DeploymentException("Did not receive proper response from the server, instead was: "
-                    + response);
-            }
-            if (log.isLoggable(Level.FINEST)) {
-                log.finest("Response from deployment: " + response);
-            }
-
-            // Set deployment name
-            final int startIndex = new String(WireProtocol.RESPONSE_OK_PREFIX + WireProtocol.COMMAND_DEPLOY_PREFIX)
-                .length();
-            deploymentName = response.substring(startIndex);
-            if (log.isLoggable(Level.FINER)) {
-                log.finer("Got deployment: " + deploymentName);
-            }
-            this.deploymentName = deploymentName;
-
-        } catch (final IOException ioe) {
-            this.closeRemoteResources();
-            throw new DeploymentException("I/O problem encountered during deployment", ioe);
-        } catch (final RuntimeException re) {
-            this.closeRemoteResources();
-            throw new DeploymentException("Unexpected problem encountered during deployment", re);
+            remoteProcess.waitFor();
+        } catch (final InterruptedException ie) {
+            Thread.interrupted();
         }
-
-        // Create and return ProtocolMetaData
-        final ProtocolMetaData pmd = new ProtocolMetaData();
-        final DeploymentContext deploymentContext = DeploymentContext.create(deploymentName, socketInstream,
-            socketOutstream, reader, writer);
-        pmd.addContext(deploymentContext);
-        return pmd;
+        // Null out
+        remoteProcess = null;
     }
 
-    @Override
-    public void undeploy(final Archive<?> archive) throws DeploymentException {
-
-        assert deploymentName != null : "Deployment name should be set";
-
-        try {
-            // Write the undeploy command prefix and flush it
-            writer.print(WireProtocol.COMMAND_UNDEPLOY_PREFIX);
-            // Write the deployment name
-            writer.print(deploymentName);
-            // Terminate the command and flush
-            writer.write(WireProtocol.COMMAND_EOF_DELIMITER);
-            writer.flush();
-
-            // Block until we get "OK" response
-            final String response = reader.readLine();
-            if (!response.startsWith(WireProtocol.RESPONSE_OK_PREFIX)) {
-                throw new DeploymentException("Did not receive proper response from the server, instead was: "
-                    + response);
-            }
-
-            if (log.isLoggable(Level.FINEST)) {
-                log.finest("Response from undeployment: " + response);
-            }
-
-        } catch (final IOException ioe) {
-            this.closeRemoteResources();
-            throw new DeploymentException("I/O problem encountered during undeployment", ioe);
-        } catch (final RuntimeException re) {
-            this.closeRemoteResources();
-            throw new DeploymentException("Unexpected problem encountered during undeployment", re);
-        }
-    }
-
-    /**
-     * @throws UnsupportedOperationException
-     * @see org.jboss.arquillian.container.spi.client.container.DeployableContainer#deploy(org.jboss.shrinkwrap.descriptor.api.Descriptor)
-     */
-    @Override
-    public void deploy(final Descriptor descriptor) throws DeploymentException {
-        throw new UnsupportedOperationException(ERROR_MESSAGE_DESCRIPTORS_UNSUPPORTED);
-    }
-
-    /**
-     * @throws UnsupportedOperationException
-     * @see org.jboss.arquillian.container.spi.client.container.DeployableContainer#undeploy(org.jboss.shrinkwrap.descriptor.api.Descriptor)
-     */
-    @Override
-    public void undeploy(final Descriptor descriptor) throws DeploymentException {
-        throw new UnsupportedOperationException(ERROR_MESSAGE_DESCRIPTORS_UNSUPPORTED);
-
-    }
-
-    /**
-     * Safely close remote resources
-     */
-    private void closeRemoteResources() {
-        if (reader != null) {
-            try {
-                reader.close();
-            } catch (final IOException ignore) {
-            }
-            reader = null;
-        }
-        if (writer != null) {
-            writer.close();
-            writer = null;
-        }
-        if (socketOutstream != null) {
-            try {
-                socketOutstream.close();
-            } catch (final IOException ignore) {
-            }
-            socketOutstream = null;
-        }
-        if (socketInstream != null) {
-            try {
-                socketInstream.close();
-            } catch (final IOException ignore) {
-            }
-            socketInstream = null;
-        }
-        if (socket != null) {
-            try {
-                socket.close();
-            } catch (final IOException ignore) {
-            }
-            socket = null;
+    private static final class SecurityActions {
+        private SecurityActions() {
+            throw new UnsupportedOperationException("No instance permitted");
         }
 
+        static String getSystemProperty(final String key) {
+            assert key != null && key.length() > 0 : "key must be specified";
+            if (System.getSecurityManager() == null) {
+                return System.getProperty(key);
+            }
+            return AccessController.doPrivileged(new PrivilegedAction<String>() {
+                @Override
+                public String run() {
+                    return System.getProperty(key);
+                }
+            });
+        }
     }
 }

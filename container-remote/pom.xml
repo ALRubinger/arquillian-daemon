@@ -9,9 +9,13 @@
   </parent>
 
   <modelVersion>4.0.0</modelVersion>
+  
+  <properties>
+    <maven.test.skip>true</maven.test.skip>
+  </properties>
 
-  <artifactId>arquillian-daemon-container-managed</artifactId>
-  <name>Managed Container</name>
+  <artifactId>arquillian-daemon-container-remote</artifactId>
+  <name>Remote Container</name>
   
   <dependencies>
       <dependency>
@@ -42,7 +46,6 @@
       <dependency>
         <groupId>org.jboss.arquillian.junit</groupId>
         <artifactId>arquillian-junit-container</artifactId>
-        <!-- <scope>test</scope>   -->
       </dependency>
       <dependency>
         <groupId>junit</groupId>
@@ -54,47 +57,11 @@
   <build>
     <plugins>
       <plugin>
-        <artifactId>maven-dependency-plugin</artifactId>
-        <executions>
-          <execution>
-            <id>copyMain</id>
-            <phase>pre-integration-test</phase>
-            <goals>
-              <goal>copy</goal>
-            </goals>
-            <configuration>
-              <outputDirectory>${project.build.directory}</outputDirectory>
-              <overWriteReleases>false</overWriteReleases>
-              <overWriteSnapshots>false</overWriteSnapshots>
-              <overWriteIfNewer>true</overWriteIfNewer>
-              <stripVersion>true</stripVersion>
-              <artifactItems>
-                <artifactItem>
-                  <groupId>org.jboss.arquillian.daemon</groupId>
-                  <artifactId>arquillian-daemon-main</artifactId>
-                </artifactItem>
-              </artifactItems>
-            </configuration>
-          </execution>
-        </executions>
-      </plugin>
-      <plugin>
         <artifactId>maven-surefire-plugin</artifactId>
         <configuration>
-          <skip>true</skip>
+          <!-- Override at command line if you've manually started a running server -->
+          <skip>${maven.test.skip}</skip>
         </configuration>
-        <executions>
-          <execution>
-            <id>it</id>
-            <phase>integration-test</phase>
-            <goals>
-              <goal>test</goal>
-            </goals>
-            <configuration>
-             <skip>false</skip>
-            </configuration>
-          </execution>
-        </executions>
       </plugin>
     </plugins>
    </build>

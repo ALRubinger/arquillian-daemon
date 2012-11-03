@@ -16,14 +16,21 @@
  */
 package org.jboss.arquillian.daemon.container.managed;
 
+import java.io.File;
+
 import org.jboss.arquillian.container.spi.ConfigurationException;
 import org.jboss.arquillian.container.spi.client.container.ContainerConfiguration;
+import org.jboss.arquillian.daemon.container.common.DaemonContainerConfigurationBase;
 
 /**
+ * {@link ContainerConfiguration} implementation for Managed Containers
+ *
  * @author <a href="mailto:alr@jboss.org">Andrew Lee Rubinger</a>
  */
 public class ManagedDaemonContainerConfiguration extends DaemonContainerConfigurationBase implements
     ContainerConfiguration {
+
+    private String serverJarFile;
 
     /**
      * {@inheritDoc}
@@ -33,6 +40,29 @@ public class ManagedDaemonContainerConfiguration extends DaemonContainerConfigur
     @Override
     public void validate() throws ConfigurationException {
         super.validate();
+        if (serverJarFile == null || serverJarFile.length() == 0) {
+            throw new ConfigurationException("\"serverJarFile\" must be specified");
+        }
+        final File file = new File(serverJarFile);
+        if (!file.exists() || file.isDirectory()) {
+            throw new ConfigurationException("Server JAR file must exist and not be a directory: "
+                + file.getAbsolutePath());
+        }
+    }
+
+    /**
+     * @return the serverJarFile
+     */
+    public String getServerJarFile() {
+        return serverJarFile;
+    }
+
+    /**
+     * @param serverJarFile
+     *            the serverJarFile to set
+     */
+    public void setServerJarFile(final String serverJarFile) {
+        this.serverJarFile = serverJarFile;
     }
 
 }

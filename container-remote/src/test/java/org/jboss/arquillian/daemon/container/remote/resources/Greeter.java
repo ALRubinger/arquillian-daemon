@@ -14,27 +14,29 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.jboss.arquillian.daemon.container.managed;
-
-import org.jboss.arquillian.container.spi.client.container.DeployableContainer;
-import org.jboss.arquillian.core.spi.LoadableExtension;
-import org.jboss.arquillian.daemon.container.common.DaemonContainerExtensionBase;
+package org.jboss.arquillian.daemon.container.remote.resources;
 
 /**
- * {@link LoadableExtension} implementation for the Managed Daemon Container
+ * Test class to greet a user
  *
  * @author <a href="mailto:alr@jboss.org">Andrew Lee Rubinger</a>
  */
-public class ManagedDaemonContainerExtension extends DaemonContainerExtensionBase implements LoadableExtension {
+public class Greeter {
+
+    public static final String PREFIX = "Word up, ";
 
     /**
-     * {@inheritDoc}
+     * Greets the user by prepending {@link Greeter#PREFIX} to the required, supplied name
      *
-     * @see org.jboss.arquillian.core.spi.LoadableExtension#register(org.jboss.arquillian.core.spi.LoadableExtension.ExtensionBuilder)
+     * @param name
+     * @return
+     * @throws IllegalArgumentException
+     *             If the name is not specified
      */
-    @Override
-    public void register(final ExtensionBuilder builder) {
-        super.register(builder);
-        builder.service(DeployableContainer.class, ManagedDaemonDeployableContainer.class);
+    public static String greet(final String name) throws IllegalArgumentException {
+        if (name == null || name.length() == 0) {
+            throw new IllegalArgumentException("name must be specified");
+        }
+        return PREFIX + name;
     }
 }

@@ -261,7 +261,9 @@
   <!-- Aggregate Modules -->
   <modules>
     <module>build-resources</module>
+    <module>container-common</module>
     <module>container-managed</module>
+    <module>container-remote</module>
     <module>main</module>
     <module>protocol-arquillian</module>
     <module>protocol-wire</module>

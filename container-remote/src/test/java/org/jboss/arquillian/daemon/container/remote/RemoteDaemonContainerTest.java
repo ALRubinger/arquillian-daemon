@@ -14,10 +14,10 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.jboss.arquillian.daemon.container.managed;
+package org.jboss.arquillian.daemon.container.remote;
 
 import org.jboss.arquillian.container.test.api.Deployment;
-import org.jboss.arquillian.daemon.container.managed.resources.Greeter;
+import org.jboss.arquillian.daemon.container.remote.resources.Greeter;
 import org.jboss.arquillian.junit.Arquillian;
 import org.jboss.shrinkwrap.api.ShrinkWrap;
 import org.jboss.shrinkwrap.api.spec.JavaArchive;
@@ -26,12 +26,12 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 
 /**
- * Tests the Managed Daemon Container
+ * Tests the Remote Daemon Container
  *
  * @author <a href="mailto:alr@jboss.org">Andrew Lee Rubinger</a>
  */
 @RunWith(Arquillian.class)
-public class ManagedDaemonContainerTest {
+public class RemoteDaemonContainerTest {
 
     @Deployment
     public static JavaArchive createDeployment() {

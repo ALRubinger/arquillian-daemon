@@ -14,18 +14,18 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.jboss.arquillian.daemon.container.managed;
+package org.jboss.arquillian.daemon.container.common;
 
-import org.jboss.arquillian.container.spi.client.container.DeployableContainer;
+import org.jboss.arquillian.container.test.spi.client.protocol.Protocol;
 import org.jboss.arquillian.core.spi.LoadableExtension;
-import org.jboss.arquillian.daemon.container.common.DaemonContainerExtensionBase;
+import org.jboss.arquillian.daemon.protocol.arquillian.DaemonProtocol;
 
 /**
- * {@link LoadableExtension} implementation for the Managed Daemon Container
+ * Base {@link LoadableExtension} implementation for Arquillian Server Daemon containers
  *
  * @author <a href="mailto:alr@jboss.org">Andrew Lee Rubinger</a>
  */
-public class ManagedDaemonContainerExtension extends DaemonContainerExtensionBase implements LoadableExtension {
+public class DaemonContainerExtensionBase implements LoadableExtension {
 
     /**
      * {@inheritDoc}
@@ -34,7 +34,7 @@ public class ManagedDaemonContainerExtension extends DaemonContainerExtensionBas
      */
     @Override
     public void register(final ExtensionBuilder builder) {
-        super.register(builder);
-        builder.service(DeployableContainer.class, ManagedDaemonDeployableContainer.class);
+        builder.service(Protocol.class, DaemonProtocol.class);
     }
+
 }

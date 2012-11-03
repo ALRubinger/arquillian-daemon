@@ -14,27 +14,28 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.jboss.arquillian.daemon.container.managed;
+package org.jboss.arquillian.daemon.container.remote;
 
-import org.jboss.arquillian.container.spi.client.container.DeployableContainer;
-import org.jboss.arquillian.core.spi.LoadableExtension;
-import org.jboss.arquillian.daemon.container.common.DaemonContainerExtensionBase;
+import org.jboss.arquillian.container.spi.ConfigurationException;
+import org.jboss.arquillian.container.spi.client.container.ContainerConfiguration;
+import org.jboss.arquillian.daemon.container.common.DaemonContainerConfigurationBase;
 
 /**
- * {@link LoadableExtension} implementation for the Managed Daemon Container
+ * {@link ContainerConfiguration} implementation for Remote Containers
  *
  * @author <a href="mailto:alr@jboss.org">Andrew Lee Rubinger</a>
  */
-public class ManagedDaemonContainerExtension extends DaemonContainerExtensionBase implements LoadableExtension {
+public class RemoteDaemonContainerConfiguration extends DaemonContainerConfigurationBase implements
+    ContainerConfiguration {
 
     /**
      * {@inheritDoc}
      *
-     * @see org.jboss.arquillian.core.spi.LoadableExtension#register(org.jboss.arquillian.core.spi.LoadableExtension.ExtensionBuilder)
+     * @see org.jboss.arquillian.container.spi.client.container.ContainerConfiguration#validate()
      */
     @Override
-    public void register(final ExtensionBuilder builder) {
-        super.register(builder);
-        builder.service(DeployableContainer.class, ManagedDaemonDeployableContainer.class);
+    public void validate() throws ConfigurationException {
+        super.validate();
     }
+
 }
