@@ -64,6 +64,6 @@ public final class Servers {
         }
 
         // Create and return a new server instance
-        return new NettyServer(resolvedInetAddress);
+        return new JettyServer(resolvedInetAddress);
     }
 }

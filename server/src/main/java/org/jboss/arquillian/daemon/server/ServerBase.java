@@ -16,6 +16,12 @@
  */
 package org.jboss.arquillian.daemon.server;
 
+import org.jboss.shrinkwrap.api.ConfigurationBuilder;
+import org.jboss.shrinkwrap.api.Domain;
+import org.jboss.shrinkwrap.api.GenericArchive;
+import org.jboss.shrinkwrap.api.ShrinkWrap;
+import org.jboss.shrinkwrap.api.classloader.ShrinkWrapClassLoader;
+
 import java.io.IOException;
 import java.io.ObjectOutputStream;
 import java.io.Serializable;
@@ -26,21 +32,11 @@ import java.security.AccessController;
 import java.security.PrivilegedAction;
 import java.util.HashSet;
 import java.util.Set;
-import java.util.concurrent.Callable;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.*;
 import java.util.logging.Handler;
 import java.util.logging.Level;
 import java.util.logging.LogRecord;
 import java.util.logging.Logger;
-
-import org.jboss.shrinkwrap.api.ConfigurationBuilder;
-import org.jboss.shrinkwrap.api.Domain;
-import org.jboss.shrinkwrap.api.GenericArchive;
-import org.jboss.shrinkwrap.api.ShrinkWrap;
-import org.jboss.shrinkwrap.api.classloader.ShrinkWrapClassLoader;
 
 /**
  * Base support for {@link Server} implementations
@@ -72,7 +68,7 @@ public abstract class ServerBase implements Server {
         assert bindAddress != null : "Bind address must be specified";
 
         // Determine the ClassLoader to use in creating the SW Domain
-        final ClassLoader thisCl = NettyServer.class.getClassLoader();
+        final ClassLoader thisCl = ServerBase.class.getClassLoader();
         final Set<ClassLoader> classloaders = new HashSet<ClassLoader>(1);
         classloaders.add(thisCl);
         if (log.isLoggable(Level.FINEST)) {
@@ -142,7 +138,7 @@ public abstract class ServerBase implements Server {
         final Logger log = Logger.getAnonymousLogger();
         log.addHandler(new Handler() {
 
-            private final String PREFIX = "[" + NettyServer.class.getSimpleName() + "] ";
+            private final String PREFIX = "[" + ServerBase.class.getSimpleName() + "] ";
 
             @Override
             public void publish(final LogRecord record) {

@@ -34,13 +34,13 @@ import org.junit.Assert;
 import org.junit.Test;
 
 /**
- * Test cases to ensure the {@link NettyServer} is working as contracted
+ * Test cases to ensure the {@link JettyServer} is working as contracted
  *
  * @author <a href="mailto:alr@jboss.org">Andrew Lee Rubinger</a>
  */
-public class NettyServerTest {
+public class JettyServerTest {
 
-    private static final Logger log = Logger.getLogger(NettyServerTest.class.getName());
+    private static final Logger log = Logger.getLogger(JettyServerTest.class.getName());
 
     @Test
     public void isNotRunningAfterCreate() throws ServerLifecycleException {
@@ -196,7 +196,7 @@ public class NettyServerTest {
                 }
                 Thread.sleep(300);
             }
-            Assert.fail("Server did not shut down via wire protocol request in the alloted time");
+            Assert.fail("Server did not shut down via wire protocol request in the allotted time");
 
         } finally {
             if (socket != null) {
